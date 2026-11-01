@@ -122,8 +122,8 @@ socket.on('state', (s) => {
   if (!handSeat || !isMine(handSeat)) handSeat = state.you;
   render();
   if (first) {
-    const saved = store.get('edh.mat', null);
-    if (saved && JSON.stringify(saved) !== JSON.stringify(me()?.mat ?? null)) send({ type: 'setMat', mat: saved });
+    const saved = store.get('edh.mat.v2', null);
+    if (saved && JSON.stringify(saved.mat) !== JSON.stringify(me()?.mat ?? null)) send({ type: 'setMat', mat: saved.mat });
   }
   if (first && !me()?.hasDeck) openDeckModal(state.you);
 });
@@ -643,17 +643,21 @@ function matStyle(mat) {
   if (mat?.kind === 'image') return { background: `url("/assets/${mat.value}") center / cover no-repeat` };
   return {};
 }
-const matName = (file) => (file === 'mats/tavern.webp' ? 'Taberna (por defecto)' : file.replace(/^mats\//, '').replace(/\.\w+$/, '').replace(/[-_]+/g, ' '));
+const MAT_NAMES = { 'mats/olas.webp': 'Olas (por defecto)', 'mats/ranas.webp': 'Ranas hechiceras', 'mats/runas.webp': 'Pergamino rúnico', 'mats/carton.webp': 'Cartón', 'mats/bosque-nocturno.webp': 'Bosque nocturno', 'mats/oceano.webp': 'Océano', 'mats/neon.webp': 'Neón' };
+const matName = (file) => MAT_NAMES[file] ?? file.replace(/^mats\//, '').replace(/\.\w+$/, '').replace(/[-_]+/g, ' ');
+const MAT_ORDER = ['mats/olas.webp', 'mats/ranas.webp', 'mats/runas.webp', 'mats/carton.webp'];
+const matRank = (f) => (MAT_ORDER.includes(f) ? MAT_ORDER.indexOf(f) : f.includes('/prueba-') ? 200 : 100);
 async function chooseMat(mat) {
   const res = await send({ type: 'setMat', mat });
   if (!res?.ok) return;
-  store.set('edh.mat', mat);
+  store.set('edh.mat.v2', { mat });
   renderMatPicker();
 }
 function renderMatPicker() {
   const current = me()?.mat ?? null;
   const same = (m) => JSON.stringify(m ?? null) === JSON.stringify(current);
-  $('#mat-images').replaceChildren(...[null, ...matImages.filter((f) => f !== 'mats/tavern.webp').map((f) => ({ kind: 'image', value: f }))].map((m) => h('button', {
+  const images = matImages.filter((f) => f !== 'mats/tavern.webp').sort((a, b) => matRank(a) - matRank(b) || a.localeCompare(b));
+  $('#mat-images').replaceChildren(...[...images.map((f) => ({ kind: 'image', value: f })), null].map((m) => h('button', {
     class: `mat-option${same(m) ? ' on' : ''}`, title: m ? matName(m.value) : 'Taberna (por defecto)',
     style: m ? { backgroundImage: `url("/assets/${m.value}")` } : { backgroundImage: asset('mats/tavern') ? `url("${asset('mats/tavern')}")` : '' },
     onclick: () => chooseMat(m),

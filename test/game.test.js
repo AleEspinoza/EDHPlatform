@@ -383,6 +383,7 @@ test('enviar mis cartas a las zonas de otro jugador', () => {
 
 test('tapetes: color o imagen de assets/mats, visibles para todos', () => {
   const { room, a, b } = setup();
+  assert.deepEqual(a.mat, { kind: 'image', value: 'mats/olas.webp' }, 'Olas por defecto');
   applyAction(room, a.id, { type: 'setMat', mat: { kind: 'color', value: '#43A5BE' } });
   assert.deepEqual(viewFor(room, b.id).players[0].mat, { kind: 'color', value: '#43a5be' });
   applyAction(room, a.id, { type: 'setMat', mat: { kind: 'image', value: 'mats/forest.webp' } });

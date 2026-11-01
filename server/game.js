@@ -102,7 +102,7 @@ export function addPlayer(room, name, { controlledBy = null, userId = null } = {
     poison: 0,
     cmdDamage: {},
     mana: emptyMana(),
-    mat: null, // tapete elegido: { kind: 'color'|'image', value } (null = el de la taberna)
+    mat: { ...DEFAULT_MAT }, // tapete elegido: { kind: 'color'|'image'|'anim', value } (null = el de la taberna)
     zones: emptyZones(),
     deck: null, // lista original para reiniciar
     connected: true,
@@ -163,6 +163,7 @@ function findOnAnyBattlefield(room, iid) {
   return hit;
 }
 
+export const DEFAULT_MAT = Object.freeze({ kind: 'image', value: 'mats/olas.webp' });
 export const ANIM_MATS = new Set(['lava-atardecer', 'lava-oceano', 'lava-bosque', 'lava-neon', 'lava-magma', 'lava-aurora']);
 
 /** Tapete: un color #rrggbb, una imagen dentro de assets/mats o un tapete animado. */

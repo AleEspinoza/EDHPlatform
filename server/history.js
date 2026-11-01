@@ -62,7 +62,7 @@ export function createHistory(db) {
         unfinished: t.unfinished ?? 0,
         winRate: decided ? (t.wins ?? 0) / decided : null,
         avgTurns: t.avg_turns ? Math.round(t.avg_turns * 10) / 10 : null,
-        avgMinutes: t.avg_ms ? Math.round(t.avg_ms / 60000) : null,
+        avgMinutes: t.avg_ms != null ? Math.max(1, Math.round(t.avg_ms / 60000)) : null,
         byCommander: q.byCommander.all(userId).map((r) => ({ commanders: r.commanders, games: r.games, wins: r.wins, lastPlayed: r.last_played })),
       };
     },

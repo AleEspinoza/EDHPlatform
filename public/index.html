@@ -9,43 +9,63 @@
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <!-- LOBBY -->
-  <section id="lobby" class="screen">
+  <!-- ENTRAR -->
+  <section id="login" class="screen hidden">
     <div class="lobby-card">
       <div class="lobby-fan" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
       <h1 class="brand">EDH<span>Platform</span></h1>
       <p class="tagline">Mesa virtual de Commander con salas privadas</p>
-      <div id="account-box" class="account-box">
-        <div id="account-in" class="account-in hidden">
-          <span>Conectado como <b id="acc-name"></b></span>
-          <button id="btn-logout" class="btn small ghost">Cerrar sesión</button>
+      <a id="btn-google" class="btn google wide hidden" href="/api/auth/google">
+        <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>
+        Continuar con Google
+      </a>
+      <div id="login-divider" class="divider hidden"><span>o con usuario y contraseña</span></div>
+      <form id="acc-form" class="acc-form">
+        <div class="seg">
+          <button type="button" data-mode="login" class="on">Iniciar sesión</button>
+          <button type="button" data-mode="register">Crear cuenta</button>
         </div>
-        <div id="account-out">
-          <button id="btn-acc-toggle" class="link-btn">Inicia sesión o crea una cuenta para guardar tus mazos</button>
-          <form id="acc-form" class="acc-form hidden">
-            <div class="seg">
-              <button type="button" data-mode="login" class="on">Iniciar sesión</button>
-              <button type="button" data-mode="register">Crear cuenta</button>
-            </div>
-            <input id="acc-user" maxlength="20" placeholder="Usuario" autocomplete="username" />
-            <input id="acc-pass" type="password" maxlength="200" placeholder="Contraseña (mín. 8)" autocomplete="current-password" />
-            <button id="btn-acc" class="btn wide">Entrar</button>
-            <p id="acc-error" class="error small" role="alert"></p>
-          </form>
+        <input id="acc-user" maxlength="20" placeholder="Usuario" autocomplete="username" />
+        <input id="acc-pass" type="password" maxlength="200" placeholder="Contraseña (mín. 8)" autocomplete="current-password" />
+        <button id="btn-acc" class="btn primary wide">Entrar</button>
+        <p id="acc-error" class="error small" role="alert"></p>
+      </form>
+    </div>
+  </section>
+
+  <!-- INICIO / CUENTA -->
+  <section id="lobby" class="screen hidden">
+    <header class="home-bar">
+      <div class="brand small">EDH<span>Platform</span></div>
+      <div class="spacer"></div>
+      <div class="me-chip"><span id="me-avatar" class="me-avatar"></span><b id="acc-name"></b></div>
+      <button id="btn-logout" class="btn small ghost">Cerrar sesión</button>
+    </header>
+    <div class="home">
+      <section class="home-play" aria-labelledby="play-title">
+        <h2 id="play-title">Jugar</h2>
+        <button id="btn-create" class="btn primary wide">Crear sala privada</button>
+        <button id="btn-solo" class="btn wide ghost-border">Practicar solo (goldfish)</button>
+        <div class="divider"><span>o únete con un código</span></div>
+        <div class="join-row">
+          <input id="lobby-code" maxlength="6" placeholder="CÓDIGO" autocomplete="off" aria-label="Código de sala" />
+          <button id="btn-join" class="btn">Unirse</button>
         </div>
-      </div>
-      <label class="field">
-        <span>Tu nombre</span>
-        <input id="lobby-name" maxlength="24" placeholder="Ej: Alejandro" autocomplete="nickname" />
-      </label>
-      <button id="btn-create" class="btn primary wide">Crear sala privada</button>
-      <button id="btn-solo" class="btn wide ghost-border">Practicar solo (goldfish)</button>
-      <div class="divider"><span>o únete con un código</span></div>
-      <div class="join-row">
-        <input id="lobby-code" maxlength="6" placeholder="CÓDIGO" autocomplete="off" />
-        <button id="btn-join" class="btn">Unirse</button>
-      </div>
-      <p id="lobby-error" class="error" role="alert"></p>
+        <p id="lobby-error" class="error" role="alert"></p>
+      </section>
+      <section class="home-account">
+        <nav class="tabs" role="tablist">
+          <button role="tab" data-tab="decks" class="on">Mis mazos</button>
+          <button role="tab" data-tab="games">Partidas</button>
+          <button role="tab" data-tab="stats">Estadísticas</button>
+        </nav>
+        <div id="tab-decks" class="tab-panel">
+          <div class="tab-actions"><button id="btn-new-deck" class="btn small">+ Nuevo mazo</button></div>
+          <div id="home-decks" class="saved-list tall"></div>
+        </div>
+        <div id="tab-games" class="tab-panel hidden"><div id="home-games" class="games-list"></div></div>
+        <div id="tab-stats" class="tab-panel hidden"><div id="home-stats"></div></div>
+      </section>
     </div>
   </section>
 
@@ -71,7 +91,9 @@
       <button id="btn-coin" class="btn small ghost" title="Lanzar moneda">🪙</button>
       <button id="btn-token" class="btn small ghost">+ Token</button>
       <button id="btn-deck" class="btn small">Mazo</button>
-      <button id="btn-help" class="btn small ghost" title="Atajos">?</button>
+      <button id="btn-end" class="btn small">Terminar partida</button>
+      <button id="btn-keys" class="btn small ghost" title="Atajos de teclado (K)">⌨</button>
+      <button id="btn-help" class="btn small ghost" title="Ayuda">?</button>
       <button id="btn-leave" class="btn small danger ghost">Salir</button>
     </header>
 
@@ -151,7 +173,7 @@
         <li><b>Clic derecho</b> en una carta o zona: todas las acciones (boca abajo, contadores, revelar, tope/fondo…).</li>
         <li><b>Clic</b> en la biblioteca: robar. Clic en cementerio/exilio: ver la zona.</li>
         <li>Soltar sobre la biblioteca la deja en el tope; con <kbd>Shift</kbd>, al fondo.</li>
-        <li>Atajos: <kbd>D</kbd> robar · <kbd>U</kbd> enderezar todo · con el mouse sobre una carta: <kbd>T</kbd> girar, <kbd>F</kbd> boca abajo, <kbd>+</kbd>/<kbd>-</kbd> contadores.</li>
+        <li><b>Atajos</b>: <kbd>Espacio</kbd> pasa el turno, <kbd>D</kbd> roba, <kbd>U</kbd> endereza todo, y con el mouse sobre una carta <kbd>T</kbd> la gira, <kbd>P</kbd> la juega, <kbd>Supr</kbd> la manda al cementerio. Lista completa y reasignable con <kbd>K</kbd> o el botón ⌨.</li>
         <li><b>Anuncios</b>: botones ✋ Respondo, ⚡ Trigger, ⏸ Espera y ✓ OK (atajos <kbd>R</kbd> y <kbd>G</kbd>). En el clic derecho de una carta pública, «Anunciar trigger de esta carta» muestra la carta a todos.</li>
         <li><b>Comandos de chat</b>: <code>/moneda</code> · <code>/dado</code> o <code>/d6</code> o <code>/dado 2d6</code> · <code>/respondo</code> · <code>/trigger</code> · <code>/espera</code> · <code>/ok</code> · <code>/robar 2</code> · <code>/enderezar</code> · <code>/barajar</code> · <code>/vida -3</code> · <code>/ayuda</code></li>
         <li><b>Adjuntar</b>: clic derecho → «Adjuntar a…» y luego clic en el permanente (tuyo o rival). Arrastrar una carta adjunta la suelta.</li>
@@ -187,6 +209,33 @@
         <div class="modal-actions inline"><button class="btn small ghost" data-close>Cerrar</button></div>
       </div>
       <div id="info-body" class="info-body"></div>
+    </div>
+  </div>
+
+  <div id="modal-end" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="end-title">
+    <div class="modal-box">
+      <h2 id="end-title">Terminar partida</h2>
+      <p class="muted">¿Quién ganó? La partida queda en el historial de cada jugador.</p>
+      <div id="end-players" class="end-players"></div>
+      <label class="check"><input type="checkbox" id="end-rematch" checked /> Revancha: barajar todos los mazos de nuevo</label>
+      <div class="modal-actions">
+        <button class="btn ghost" data-close>Cancelar</button>
+        <button id="btn-end-draw" class="btn">Empate</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-keys" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="keys-title">
+    <div class="modal-box wide">
+      <div class="modal-head">
+        <h2 id="keys-title">Atajos de teclado</h2>
+        <div class="modal-actions inline">
+          <button id="btn-keys-reset" class="btn small ghost">Restaurar</button>
+          <button class="btn small ghost" data-close>Cerrar</button>
+        </div>
+      </div>
+      <p class="muted small">Haz clic en una tecla para cambiarla y luego presiona la nueva. Las acciones sobre «la carta» usan la que tengas bajo el mouse.</p>
+      <div id="keys-list" class="keys-list"></div>
     </div>
   </div>
 

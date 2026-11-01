@@ -54,25 +54,30 @@ function send(action) {
 const act = (pid, action) => send(pid && pid !== state?.you ? { ...action, seat: pid } : action);
 const emit = (ev, data) => new Promise((r) => socket.emit(ev, data, r));
 
-async function enterRoom(res, name) {
+function showScreen(name) {
+  for (const id of ['login', 'lobby', 'room']) $(`#${id}`).classList.toggle('hidden', id !== name);
+}
+
+async function enterRoom(res) {
   if (!res?.ok) {
+    if (res?.code === 'login') return showScreen('login'), false;
     $('#lobby-error').textContent = res?.error ?? 'No se pudo entrar';
     return false;
   }
-  session = { code: res.code, token: res.token, name };
+  session = { code: res.code, token: res.token };
   store.set('edh.session', session);
   history.replaceState(null, '', `?sala=${res.code}`);
-  $('#lobby').classList.add('hidden');
-  $('#room').classList.remove('hidden');
+  showScreen('room');
   return true;
 }
 
 socket.on('connect', async () => {
+  if (!account) return; // sin sesión no hay sala a la cual volver
   // Reconexión automática al asiento si había sesión en esta sala.
   const urlCode = new URLSearchParams(location.search).get('sala')?.toUpperCase();
   if (session?.token && (!urlCode || urlCode === session.code)) {
-    const res = await emit('joinRoom', { code: session.code, token: session.token, name: session.name });
-    if (!(await enterRoom(res, session.name))) {
+    const res = await emit('joinRoom', { code: session.code, token: session.token });
+    if (!(await enterRoom(res))) {
       store.del('edh.session');
       session = null;
       $('#lobby-error').textContent = '';
@@ -92,6 +97,7 @@ socket.on('state', (s) => {
 });
 socket.on('event', (ev) => {
   if (ev.kind === 'announce') return showAnnouncement(ev);
+  if (ev.kind === 'gameOver') return showGameOver(ev);
   if (ev.kind === 'coin') return showCoin(ev);
   if (ev.kind === 'dice') return showDice(ev);
   if (ev.kind === 'reveal') return toastCards(`${ev.player} revela`, [ev.card]);
@@ -115,19 +121,35 @@ async function api(method, path, body) {
 // ---------- Cuenta ----------
 let accMode = 'login';
 function renderAccount() {
-  $('#account-in').classList.toggle('hidden', !account);
-  $('#account-out').classList.toggle('hidden', Boolean(account));
-  $('#acc-name').textContent = account?.username ?? '';
-  if (account && !$('#lobby-name').value.trim()) $('#lobby-name').value = account.username;
+  $('#acc-name').textContent = account?.displayName ?? account?.username ?? '';
+  const av = $('#me-avatar');
+  av.style.backgroundImage = account?.avatar ? `url("${account.avatar}")` : '';
+  av.textContent = account?.avatar ? '' : (account?.displayName ?? account?.username ?? '?').slice(0, 1).toUpperCase();
 }
 async function refreshAccount() {
   try { account = (await api('GET', '/auth/me')).user; } catch { account = null; }
   renderAccount();
+  if (!account) return showScreen('login');
+  if ($('#room').classList.contains('hidden')) {
+    showScreen('lobby');
+    loadHome();
+  }
+  if (socket.connected) socket.disconnect().connect(); // el socket toma la cookie de sesión
 }
-$('#btn-acc-toggle').addEventListener('click', () => {
-  $('#acc-form').classList.toggle('hidden');
-  if (!$('#acc-form').classList.contains('hidden')) $('#acc-user').focus();
-});
+async function initLogin() {
+  const params = new URLSearchParams(location.search);
+  const loginError = params.get('login_error');
+  if (loginError) {
+    $('#acc-error').textContent = loginError;
+    params.delete('login_error');
+    history.replaceState(null, '', params.toString() ? `?${params}` : '/');
+  }
+  try {
+    const { google } = await api('GET', '/auth/providers');
+    $('#btn-google').classList.toggle('hidden', !google);
+    $('#login-divider').classList.toggle('hidden', !google);
+  } catch { /* sin proveedores extra */ }
+}
 document.querySelectorAll('#acc-form [data-mode]').forEach((b) => b.addEventListener('click', () => {
   accMode = b.dataset.mode;
   document.querySelectorAll('#acc-form [data-mode]').forEach((x) => x.classList.toggle('on', x === b));
@@ -142,12 +164,9 @@ $('#acc-form').addEventListener('submit', async (e) => {
   $('#acc-error').textContent = '';
   try {
     const { user } = await api('POST', accMode === 'login' ? '/auth/login' : '/auth/register', { username: $('#acc-user').value.trim(), password: $('#acc-pass').value });
-    account = user;
     $('#acc-pass').value = '';
-    $('#acc-form').classList.add('hidden');
-    renderAccount();
-    socket.disconnect().connect(); // el socket toma la nueva cookie de sesión
-    toast(accMode === 'login' ? `Hola, ${user.username}` : `Cuenta creada. ¡Bienvenido, ${user.username}!`);
+    await refreshAccount();
+    toast(accMode === 'login' ? `Hola, ${user.displayName ?? user.username}` : `Cuenta creada. ¡Bienvenido, ${user.username}!`);
   } catch (err) {
     $('#acc-error').textContent = err.message;
   } finally {
@@ -157,36 +176,106 @@ $('#acc-form').addEventListener('submit', async (e) => {
 $('#btn-logout').addEventListener('click', async () => {
   await api('POST', '/auth/logout', {}).catch(() => {});
   account = null;
+  store.del('edh.session');
+  session = null;
   renderAccount();
+  showScreen('login');
   socket.disconnect().connect();
 });
+initLogin();
 refreshAccount();
 
-// ---------- Lobby ----------
-$('#lobby-name').value = store.get('edh.name', '');
-const lobbyName = () => {
-  const name = $('#lobby-name').value.trim();
-  store.set('edh.name', name);
-  return name;
-};
-$('#btn-create').addEventListener('click', async () => {
-  const name = lobbyName();
-  if (!name) return ($('#lobby-error').textContent = 'Escribe tu nombre');
-  enterRoom(await emit('createRoom', { name }), name);
-});
-$('#btn-solo').addEventListener('click', async () => {
-  const name = lobbyName() || 'Yo';
-  enterRoom(await emit('createRoom', { name, solo: true }), name);
-});
+// ---------- Inicio: jugar ----------
+$('#btn-create').addEventListener('click', async () => enterRoom(await emit('createRoom', {})));
+$('#btn-solo').addEventListener('click', async () => enterRoom(await emit('createRoom', { solo: true })));
 async function join() {
-  const name = lobbyName();
   const code = $('#lobby-code').value.trim().toUpperCase();
-  if (!name) return ($('#lobby-error').textContent = 'Escribe tu nombre');
   if (code.length !== 6) return ($('#lobby-error').textContent = 'El código tiene 6 caracteres');
-  enterRoom(await emit('joinRoom', { code, name }), name);
+  enterRoom(await emit('joinRoom', { code }));
 }
 $('#btn-join').addEventListener('click', join);
 $('#lobby-code').addEventListener('keydown', (e) => e.key === 'Enter' && join());
+
+// ---------- Inicio: mazos, partidas y estadísticas ----------
+let homeTab = 'decks';
+document.querySelectorAll('.tabs [data-tab]').forEach((b) => b.addEventListener('click', () => {
+  homeTab = b.dataset.tab;
+  document.querySelectorAll('.tabs [data-tab]').forEach((x) => x.classList.toggle('on', x === b));
+  for (const t of ['decks', 'games', 'stats']) $(`#tab-${t}`).classList.toggle('hidden', t !== homeTab);
+  loadHome();
+}));
+$('#btn-new-deck').addEventListener('click', () => openDeckModal(null));
+
+function loadHome() {
+  if (homeTab === 'decks') return renderHomeDecks();
+  if (homeTab === 'games') return renderHomeGames();
+  return renderHomeStats();
+}
+async function renderHomeDecks() {
+  const box = $('#home-decks');
+  try {
+    const { decks } = await api('GET', '/decks');
+    if (!decks.length) return box.replaceChildren(h('div', { class: 'saved-empty' }, 'Aún no tienes mazos. Crea uno con «+ Nuevo mazo»: pegas la lista y queda listo para jugar.'));
+    box.replaceChildren(...decks.map((d) => h('div', { class: 'saved-item' },
+      h('div', { class: 'meta' }, h('b', {}, d.name), h('span', {}, `${d.commanders || 'Sin comandante'} · ${d.cardCount} cartas · editado ${relTime(d.updatedAt)}`)),
+      h('button', { class: 'btn small ghost', onclick: async () => { openDeckModal(null); await editSavedDeck(d); } }, 'Editar'),
+      h('button', { class: 'btn small ghost danger', title: 'Borrar', onclick: async () => { await deleteSavedDeck(d); renderHomeDecks(); } }, 'Borrar'))));
+  } catch (err) {
+    box.replaceChildren(h('div', { class: 'saved-empty' }, `No se pudieron cargar tus mazos: ${err.message}`));
+  }
+}
+const RESULT = { win: ['win', 'Victoria'], loss: ['loss', 'Derrota'], draw: ['draw', 'Empate'], unfinished: ['unfinished', 'Sin terminar'] };
+function relTime(t) {
+  const d = Math.round((Date.now() - t) / 86400000);
+  if (d <= 0) return 'hoy';
+  if (d === 1) return 'ayer';
+  if (d < 30) return `hace ${d} días`;
+  return new Date(t).toLocaleDateString('es-CL');
+}
+const minutes = (ms) => `${Math.max(1, Math.round(ms / 60000))} min`;
+async function renderHomeGames() {
+  const box = $('#home-games');
+  try {
+    const { games } = await api('GET', '/games');
+    if (!games.length) return box.replaceChildren(h('div', { class: 'saved-empty' }, 'Todavía no hay partidas. Al terminar una con «Terminar partida» aparece aquí.'));
+    box.replaceChildren(...games.map((g) => {
+      const [cls, label] = RESULT[g.result] ?? ['draw', g.result];
+      const rivals = g.players.filter((p) => !p.isMe);
+      return h('article', { class: `game-row ${cls}` },
+        h('span', { class: `result-badge ${cls}` }, label),
+        h('div', { class: 'game-main' },
+          h('b', {}, g.myCommanders || 'Sin comandante'),
+          h('span', { class: 'muted small' }, `vs ${rivals.map((r) => `${r.name}${r.commanders ? ` (${r.commanders})` : ''}${r.isWinner ? ' 🏆' : ''}`).join(', ') || '—'}`)),
+        h('div', { class: 'game-meta' },
+          h('span', {}, new Date(g.endedAt).toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })),
+          h('span', { class: 'muted small' }, `${g.turns} turnos · ${minutes(g.endedAt - g.startedAt)}`)));
+    }));
+  } catch (err) {
+    box.replaceChildren(h('div', { class: 'saved-empty' }, `No se pudo cargar el historial: ${err.message}`));
+  }
+}
+async function renderHomeStats() {
+  const box = $('#home-stats');
+  try {
+    const { stats } = await api('GET', '/stats');
+    if (!stats.games) return box.replaceChildren(h('div', { class: 'saved-empty' }, 'Las estadísticas aparecen después de tu primera partida terminada.'));
+    const tile = (value, label) => h('div', { class: 'stat-tile' }, h('b', {}, value), h('span', {}, label));
+    box.replaceChildren(
+      h('div', { class: 'stat-tiles' },
+        tile(stats.games, 'partidas'),
+        tile(stats.winRate == null ? '—' : `${Math.round(stats.winRate * 100)}%`, 'victorias'),
+        tile(`${stats.wins}–${stats.losses}${stats.draws ? `–${stats.draws}` : ''}`, 'récord'),
+        tile(stats.avgTurns ?? '—', 'turnos por partida'),
+        tile(stats.avgMinutes ? `${stats.avgMinutes} min` : '—', 'duración media')),
+      stats.byCommander.length ? h('table', { class: 'cmd-table' },
+        h('thead', {}, h('tr', {}, h('th', {}, 'Comandante'), h('th', {}, 'Partidas'), h('th', {}, 'Victorias'), h('th', {}, '% victorias'))),
+        h('tbody', {}, ...stats.byCommander.map((c) => h('tr', {},
+          h('td', {}, c.commanders), h('td', {}, c.games), h('td', {}, c.wins), h('td', {}, `${Math.round((c.wins / c.games) * 100)}%`))))) : null,
+      stats.unfinished ? h('p', { class: 'muted small' }, `${stats.unfinished} partida${stats.unfinished === 1 ? '' : 's'} sin terminar no cuentan para el porcentaje.`) : null);
+  } catch (err) {
+    box.replaceChildren(h('div', { class: 'saved-empty' }, `No se pudieron cargar las estadísticas: ${err.message}`));
+  }
+}
 
 // ---------- Utilidades de estado ----------
 const me = () => state?.players.find((p) => p.id === state.you);
@@ -783,6 +872,17 @@ function openDeckModal(pid = state?.you) {
   $('#deck-save-row').classList.toggle('disabled', !account);
   $('#deck-save-row').title = account ? '' : 'Inicia sesión desde la pantalla de inicio para guardar mazos';
   $('#mox-url').value = '';
+  // Fuera de una sala, el modal solo crea o edita mazos de la cuenta.
+  const inRoom = Boolean(state);
+  $('#deck-title').textContent = inRoom ? 'Cargar mazo' : 'Nuevo mazo';
+  $('#btn-deck-load').textContent = inRoom ? 'Cargar y barajar' : 'Guardar mazo';
+  $('#saved-decks').classList.toggle('hidden', !inRoom);
+  if (!inRoom) {
+    $('#deck-save').checked = true;
+    $('#deck-save').disabled = true;
+    $('#deck-commanders').value = '';
+    $('#deck-list').value = '';
+  }
   openModal('#modal-deck');
   renderSavedDecks();
   renderMoxfield();
@@ -888,14 +988,14 @@ $('#btn-deck-load').addEventListener('click', async () => {
   const parsed = { commanders: [...fromCmd.commanders, ...fromList.commanders], cards: [...fromCmd.cards, ...fromList.cards] };
   const total = [...parsed.commanders, ...parsed.cards].reduce((s, e) => s + e.qty, 0);
   if (!total) { status.textContent = 'La lista está vacía.'; status.className = 'status err'; return; }
-  if (deckFor === state.you) store.set('edh.deck', { commanders: cmdText, list: listText });
+  if (state && deckFor === state.you) store.set('edh.deck', { commanders: cmdText, list: listText });
   btn.disabled = true;
   status.className = 'status';
   status.textContent = `Buscando ${total} cartas en Scryfall…`;
   try {
     const deck = await resolveDeck(parsed, (done, all) => { status.textContent = `Buscando cartas en Scryfall… ${done}/${all}`; });
-    const res = await act(deckFor, { type: 'setDeck', commanders: deck.commanders, cards: deck.cards });
-    if (res?.ok && account && $('#deck-save').checked) {
+    const res = state ? await act(deckFor, { type: 'setDeck', commanders: deck.commanders, cards: deck.cards }) : { ok: true };
+    if (res?.ok && account && (!state || $('#deck-save').checked)) {
       const name = $('#deck-name').value.trim() || deck.commanders.map((c) => c.name).join(' + ') || 'Mi mazo';
       const body = { name, commandersText: cmdText, listText: listText, resolved: { commanders: deck.commanders, cards: deck.cards } };
       try {
@@ -906,7 +1006,13 @@ $('#btn-deck-load').addEventListener('click', async () => {
         toast(`No se pudo guardar: ${err.message}`, true);
       }
     }
-    if (res?.ok) {
+    if (res?.ok && !state) {
+      if (deck.notFound.length) {
+        status.className = 'status warn';
+        status.textContent = `Guardado. No encontradas: ${deck.notFound.join(', ')}`;
+      } else closeModal('#modal-deck');
+      renderHomeDecks();
+    } else if (res?.ok) {
       const count = deck.commanders.length + deck.cards.length;
       if (deck.notFound.length) {
         status.className = 'status warn';
@@ -1031,9 +1137,34 @@ $('#btn-leave').addEventListener('click', async () => {
   session = null;
   state = null;
   history.replaceState(null, '', '/');
-  $('#room').classList.add('hidden');
-  $('#lobby').classList.remove('hidden');
+  showScreen('lobby');
+  loadHome();
 });
+
+// ---------- Terminar partida ----------
+$('#btn-end').addEventListener('click', () => {
+  if (state.solo) return toast('Las prácticas en solitario no se guardan en el historial. Usa «Salir» para terminar.');
+  const humans = state.players.filter((p) => !p.controlledBy);
+  $('#end-players').replaceChildren(...humans.map((p) => h('button', {
+    class: 'end-player', style: { '--pc': p.color },
+    onclick: () => endGame(p.id),
+  },
+  h('span', { class: 'portrait small', style: artCrop(p.commanderImages?.[0]) ? { backgroundImage: `url("${artCrop(p.commanderImages[0])}")` } : {} }),
+  h('span', {}, h('b', {}, p.name), h('span', { class: 'muted small' }, p.commanderNames.join(' + ') || 'Sin comandante')),
+  h('span', { class: 'end-cta' }, 'Ganó'))));
+  openModal('#modal-end');
+});
+$('#btn-end-draw').addEventListener('click', () => endGame(null));
+async function endGame(winner) {
+  const res = await send({ type: 'endGame', winner, rematch: $('#end-rematch').checked });
+  if (res?.ok) closeModal('#modal-end');
+}
+function showGameOver(ev) {
+  const el = h('div', { class: 'turn-banner mine', style: { '--pc': ev.color ?? 'var(--brass)' } },
+    h('span', { class: 'turn-title' }, ev.winner ? `🏆 ${ev.winner} gana` : 'Empate'),
+    h('span', { class: 'turn-sub' }, 'La partida quedó guardada en el historial'));
+  onStage(el, 3200);
+}
 $('#chat-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = $('#chat-input');
@@ -1045,27 +1176,122 @@ $('#chat-form').addEventListener('submit', (e) => {
   });
 });
 
-// ---------- Atajos ----------
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && targeting) return stopTargeting();
-  if (e.target.closest('input, textarea') || !state || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (!$('#modal-deck').classList.contains('hidden') || !$('#modal-token').classList.contains('hidden')) return;
-  const k = e.key.toLowerCase();
-  if (e.key === 'Escape') { closeMenu(); document.querySelectorAll('.modal:not(.hidden)').forEach((m) => closeModal(`#${m.id}`)); return; }
-  const seat = handSeat ?? state.you;
-  if (k === 'd') return act(seat, { type: 'draw', n: 1 });
-  if (k === 'u') return act(seat, { type: 'untapAll' });
-  if (k === 'r') return send({ type: 'announce', kind: 'respond' });
-  if (k === 'g') {
-    const pub = hovered && isMine(hovered.owner) && !['hand', 'library'].includes(hovered.zone) ? hovered : null;
-    return act(pub?.owner ?? state.you, { type: 'announce', kind: 'trigger', iid: pub?.iid });
-  }
-  const hv = hovered && isMine(hovered.owner) && hovered.zone === 'battlefield' ? hovered : null;
+// ---------- Atajos de teclado (reasignables) ----------
+// Una combinación se escribe como «Shift+d», «Space», «Delete», «+». Las letras ignoran
+// mayúsculas; los símbolos ignoran Shift (en cada teclado el «+» está en otra tecla).
+const seatNow = () => handSeat ?? state.you;
+/** Carta bajo el mouse que controlo, con su zona. */
+const hoveredMine = (zones) => (hovered && isMine(hovered.owner) && (!zones || zones.includes(hovered.zone)) ? hovered : null);
+const moveHovered = (to, extra = {}) => {
+  const hv = hoveredMine();
   if (!hv) return;
-  if (k === 't') act(hv.owner, { type: 'tap', iid: hv.iid });
-  if (k === 'f') act(hv.owner, { type: 'flip', iid: hv.iid });
-  if (e.key === '+' || e.key === '=') act(hv.owner, { type: 'counters', iid: hv.iid, delta: 1 });
-  if (e.key === '-') act(hv.owner, { type: 'counters', iid: hv.iid, delta: -1 });
+  const found = findMyCard(hv.iid);
+  const pos = to === 'battlefield' && found ? freeSpot(playerById(hv.owner), found.card) : {};
+  act(hv.owner, { type: 'move', iid: hv.iid, to, ...pos, ...extra });
+};
+const onHovered = (zones, fn) => () => { const hv = hoveredMine(zones); if (hv) fn(hv); };
+
+const SHORTCUTS = [
+  { group: 'Partida', id: 'passTurn', label: 'Pasar el turno', keys: 'Space', run: () => send({ type: 'passTurn' }) },
+  { group: 'Partida', id: 'untapAll', label: 'Enderezar todo', keys: 'u', run: () => act(seatNow(), { type: 'untapAll' }) },
+  { group: 'Partida', id: 'draw', label: 'Robar una carta', keys: 'd', run: () => act(seatNow(), { type: 'draw', n: 1 }) },
+  { group: 'Partida', id: 'drawX', label: 'Robar X cartas…', keys: 'Shift+d', run: () => { const n = askNumber('¿Cuántas cartas robar?', 7); if (n) act(seatNow(), { type: 'draw', n }); } },
+  { group: 'Partida', id: 'mill', label: 'Moler una carta', keys: 'l', run: () => act(seatNow(), { type: 'mill', n: 1 }) },
+  { group: 'Partida', id: 'peek', label: 'Mirar el tope X…', keys: 'x', run: () => { const n = askNumber('¿Cuántas cartas mirar?', 3); if (n) peekLibrary(seatNow(), n); } },
+  { group: 'Partida', id: 'search', label: 'Buscar en la biblioteca', keys: 'b', run: () => peekLibrary(seatNow(), 0) },
+  { group: 'Partida', id: 'shuffle', label: 'Barajar la biblioteca', keys: 's', run: () => act(seatNow(), { type: 'shuffle' }) },
+  { group: 'Partida', id: 'mulligan', label: 'Mulligan', keys: 'm', run: () => confirm('¿Hacer mulligan?') && act(seatNow(), { type: 'mulligan' }) },
+  { group: 'Partida', id: 'lifeDown', label: 'Perder 1 de vida', keys: 'ArrowDown', run: () => act(seatNow(), { type: 'life', delta: -1 }) },
+  { group: 'Partida', id: 'lifeUp', label: 'Ganar 1 de vida', keys: 'ArrowUp', run: () => act(seatNow(), { type: 'life', delta: 1 }) },
+  { group: 'Partida', id: 'token', label: 'Crear token…', keys: 'n', run: () => openTokenModal(seatNow()) },
+  { group: 'Partida', id: 'coin', label: 'Lanzar una moneda', keys: 'c', run: () => send({ type: 'coin' }) },
+  { group: 'Partida', id: 'd20', label: 'Lanzar un d20', keys: 'j', run: () => send({ type: 'roll', sides: 20 }) },
+  { group: 'Mesa', id: 'respond', label: 'Anunciar «¡Respondo!»', keys: 'r', run: () => send({ type: 'announce', kind: 'respond' }) },
+  { group: 'Mesa', id: 'trigger', label: 'Anunciar trigger (de la carta, si hay una)', keys: 'g', run: () => { const hv = hoveredMine(['battlefield', 'graveyard', 'exile', 'command']); act(hv?.owner ?? state.you, { type: 'announce', kind: 'trigger', iid: hv?.iid }); } },
+  { group: 'Mesa', id: 'wait', label: 'Anunciar «¡Espera!»', keys: 'w', run: () => send({ type: 'announce', kind: 'wait' }) },
+  { group: 'Mesa', id: 'ok', label: 'Anunciar «OK, sigue»', keys: 'o', run: () => send({ type: 'announce', kind: 'ok' }) },
+  { group: 'Mesa', id: 'chat', label: 'Escribir en el chat', keys: 'Enter', run: () => $('#chat-input').focus() },
+  { group: 'Mesa', id: 'keys', label: 'Ver los atajos', keys: 'k', run: () => openKeys() },
+  { group: 'Carta bajo el mouse', id: 'tap', label: 'Girar / enderezar', keys: 't', run: onHovered(['battlefield'], (hv) => act(hv.owner, { type: 'tap', iid: hv.iid })) },
+  { group: 'Carta bajo el mouse', id: 'play', label: 'Jugar al campo', keys: 'p', run: () => moveHovered('battlefield') },
+  { group: 'Carta bajo el mouse', id: 'faceDown', label: 'Boca abajo / boca arriba', keys: 'f', run: onHovered(['battlefield'], (hv) => act(hv.owner, { type: 'flip', iid: hv.iid })) },
+  { group: 'Carta bajo el mouse', id: 'transform', label: 'Transformar', keys: 'q', run: onHovered(['battlefield'], (hv) => act(hv.owner, { type: 'transform', iid: hv.iid })) },
+  { group: 'Carta bajo el mouse', id: 'counterUp', label: 'Agregar contador', keys: '+', run: onHovered(['battlefield'], (hv) => act(hv.owner, { type: 'counters', iid: hv.iid, delta: 1 })) },
+  { group: 'Carta bajo el mouse', id: 'counterDown', label: 'Quitar contador', keys: '-', run: onHovered(['battlefield'], (hv) => act(hv.owner, { type: 'counters', iid: hv.iid, delta: -1 })) },
+  { group: 'Carta bajo el mouse', id: 'toGraveyard', label: 'Al cementerio', keys: 'Delete', run: () => moveHovered('graveyard') },
+  { group: 'Carta bajo el mouse', id: 'toExile', label: 'Al exilio', keys: 'e', run: () => moveHovered('exile') },
+  { group: 'Carta bajo el mouse', id: 'toHand', label: 'A la mano', keys: 'h', run: () => moveHovered('hand') },
+  { group: 'Carta bajo el mouse', id: 'toTop', label: 'Al tope de la biblioteca', keys: 'a', run: () => moveHovered('library', { position: 'top' }) },
+  { group: 'Carta bajo el mouse', id: 'toBottom', label: 'Al fondo de la biblioteca', keys: 'Shift+a', run: () => moveHovered('library', { position: 'bottom' }) },
+  { group: 'Carta bajo el mouse', id: 'clone', label: 'Crear copia (token)', keys: 'Shift+c', run: onHovered(['battlefield'], (hv) => act(hv.owner, { type: 'clone', iid: hv.iid })) },
+  { group: 'Carta bajo el mouse', id: 'reveal', label: 'Revelar a todos', keys: 'Shift+r', run: onHovered(null, (hv) => act(hv.owner, { type: 'reveal', iid: hv.iid })) },
+  { group: 'Carta bajo el mouse', id: 'info', label: 'Ver ficha', keys: 'i', run: () => { const c = hovered && findVisibleCard(hovered.iid)?.card; if (c?.scryfallId && !c.faceDown) openCardInfo(c); } },
+];
+let keyOverrides = store.get('edh.keys', {});
+const bindingOf = (sc) => keyOverrides[sc.id] ?? sc.keys;
+
+function comboFromEvent(e) {
+  const named = { ' ': 'Space', Backspace: 'Delete', Del: 'Delete' };
+  let key = named[e.key] ?? e.key;
+  if (['Shift', 'Control', 'Alt', 'Meta'].includes(key)) return null;
+  if (key.length === 1) {
+    if (/[a-z0-9ñ]/i.test(key)) return `${e.shiftKey ? 'Shift+' : ''}${key.toLowerCase()}`;
+    return key === '=' ? '+' : key === '_' ? '-' : key; // símbolos: sin Shift
+  }
+  return `${e.shiftKey ? 'Shift+' : ''}${key}`;
+}
+const KEY_NAMES = { Space: 'Espacio', Delete: 'Supr / Retroceso', Enter: 'Enter', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Escape: 'Esc' };
+const comboLabel = (combo) => (combo ? combo.split('+').filter(Boolean).map((part) => KEY_NAMES[part] ?? (part.length === 1 ? part.toUpperCase() : part)).join(' + ') || combo : '—');
+
+let capturing = null; // id del atajo que se está reasignando
+function openKeys() {
+  renderKeys();
+  openModal('#modal-keys');
+}
+function renderKeys() {
+  const groups = [...new Set(SHORTCUTS.map((sc) => sc.group))];
+  $('#keys-list').replaceChildren(...groups.map((g) => h('section', { class: 'keys-group' },
+    h('h3', {}, g),
+    ...SHORTCUTS.filter((sc) => sc.group === g).map((sc) => h('div', { class: 'key-row' },
+      h('span', {}, sc.label),
+      h('button', {
+        class: `keycap${capturing === sc.id ? ' capturing' : ''}${keyOverrides[sc.id] !== undefined ? ' custom' : ''}`,
+        onclick: () => { capturing = sc.id; renderKeys(); },
+      }, capturing === sc.id ? 'Presiona una tecla…' : comboLabel(bindingOf(sc))))))));
+}
+$('#btn-keys').addEventListener('click', openKeys);
+$('#btn-keys-reset').addEventListener('click', () => {
+  keyOverrides = {};
+  store.del('edh.keys');
+  capturing = null;
+  renderKeys();
+  toast('Atajos restaurados');
+});
+
+document.addEventListener('keydown', (e) => {
+  if (capturing) {
+    e.preventDefault();
+    if (e.key === 'Escape') { capturing = null; return renderKeys(); }
+    const combo = comboFromEvent(e);
+    if (!combo) return;
+    // Si otra acción usaba esa tecla, queda sin asignar.
+    for (const sc of SHORTCUTS) if (sc.id !== capturing && bindingOf(sc) === combo) keyOverrides[sc.id] = '';
+    keyOverrides[capturing] = combo;
+    store.set('edh.keys', keyOverrides);
+    capturing = null;
+    return renderKeys();
+  }
+  if (e.key === 'Escape' && targeting) return stopTargeting();
+  if (e.key === 'Escape') { closeMenu(); document.querySelectorAll('.modal:not(.hidden)').forEach((m) => closeModal(`#${m.id}`)); return; }
+  if (!state || e.target.closest('input, textarea, select') || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (document.querySelector('.modal:not(.hidden)')) return;
+  if (e.key === '?') return openKeys();
+  const combo = comboFromEvent(e);
+  const sc = combo && SHORTCUTS.find((x) => bindingOf(x) === combo);
+  if (!sc) return;
+  e.preventDefault(); // p. ej. que Espacio no desplace la página
+  closeMenu();
+  sc.run();
 });
 
 // ---------- Toasts ----------

@@ -1,5 +1,5 @@
 // Cliente de EDH Platform: lobby, tablero, arrastrar y soltar, menús y modales.
-import { parseDeckList, resolveDeck } from './deck.js';
+import { parseDeckList, resolveDeck, fetchCard, fetchRulings, searchTokens, toCardData } from './deck.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const h = (tag, attrs = {}, ...children) => {
@@ -7,8 +7,12 @@ const h = (tag, attrs = {}, ...children) => {
   for (const [k, v] of Object.entries(attrs)) {
     if (v == null || v === false) continue;
     if (k === 'class') el.className = v;
-    else if (k === 'style') Object.assign(el.style, v);
-    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'style') {
+      for (const [prop, val] of Object.entries(v)) {
+        if (prop.startsWith('--')) el.style.setProperty(prop, val);
+        else el.style[prop] = val;
+      }
+    } else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
     else if (k === 'dataset') Object.assign(el.dataset, v);
     else el.setAttribute(k, v === true ? '' : v);
   }
@@ -25,8 +29,12 @@ const store = {
 const socket = io({ transports: ['websocket', 'polling'] });
 let state = null; // última vista recibida del servidor
 let session = store.get('edh.session'); // { code, token, name }
-let hovered = null; // { iid, zone } bajo el mouse (para atajos)
-let zoneView = null; // { pid, zone } | { library: true, cards, n }
+let hovered = null; // { iid, zone, owner } bajo el mouse (para atajos)
+let zoneView = null; // { pid, zone } | { library: true, pid, cards, n }
+let handSeat = null; // asiento cuya mano se muestra (modo solitario)
+let targeting = null; // { iid, pid, name } mientras se elige a qué adjuntar
+let deckFor = null; // asiento al que se le carga el mazo
+let tokenFor = null; // { pid, x, y } para el modal de tokens
 
 const ZONE_NAMES = { library: 'Biblioteca', hand: 'Mano', battlefield: 'Campo', graveyard: 'Cementerio', exile: 'Exilio', command: 'Zona de mando' };
 
@@ -39,6 +47,8 @@ function send(action) {
     });
   });
 }
+/** Envía una acción en nombre de un asiento que controlo (yo o un asiento del modo solitario). */
+const act = (pid, action) => send(pid && pid !== state?.you ? { ...action, seat: pid } : action);
 const emit = (ev, data) => new Promise((r) => socket.emit(ev, data, r));
 
 async function enterRoom(res, name) {
@@ -73,15 +83,17 @@ socket.on('disconnect', () => toast('Conexión perdida, reintentando…', true))
 socket.on('state', (s) => {
   const first = !state;
   state = s;
+  if (!handSeat || !isMine(handSeat)) handSeat = state.you;
   render();
-  if (first && !me()?.hasDeck) openDeckModal();
+  if (first && !me()?.hasDeck) openDeckModal(state.you);
 });
 socket.on('event', (ev) => {
   if (ev.kind === 'announce') return showAnnouncement(ev);
   if (ev.kind === 'coin') return showCoin(ev);
   if (ev.kind === 'dice') return showDice(ev);
-  if (ev.kind === 'reveal') toastCards(`${ev.player} revela`, [ev.card]);
-  if (ev.kind === 'revealHand') toastCards(`${ev.player} revela su mano`, ev.cards);
+  if (ev.kind === 'reveal') return toastCards(`${ev.player} revela`, [ev.card]);
+  if (ev.kind === 'revealHand') return toastCards(ev.player.startsWith('Tope') ? ev.player : `${ev.player} revela su mano`, ev.cards);
+  if (ev.kind === 'handRequest' && isMine(ev.target)) return handRequestToast(ev);
 });
 
 // ---------- Lobby ----------
@@ -96,6 +108,10 @@ $('#btn-create').addEventListener('click', async () => {
   if (!name) return ($('#lobby-error').textContent = 'Escribe tu nombre');
   enterRoom(await emit('createRoom', { name }), name);
 });
+$('#btn-solo').addEventListener('click', async () => {
+  const name = lobbyName() || 'Yo';
+  enterRoom(await emit('createRoom', { name, solo: true }), name);
+});
 async function join() {
   const name = lobbyName();
   const code = $('#lobby-code').value.trim().toUpperCase();
@@ -109,25 +125,43 @@ $('#lobby-code').addEventListener('keydown', (e) => e.key === 'Enter' && join())
 // ---------- Utilidades de estado ----------
 const me = () => state?.players.find((p) => p.id === state.you);
 const playerById = (id) => state?.players.find((p) => p.id === id);
-const isMine = (pid) => pid === state?.you;
+/** ¿Controlo este asiento? (yo, o un asiento mío del modo solitario) */
+const isMine = (pid) => Boolean(state) && (pid === state.you || playerById(pid)?.controlledBy === state.you);
+const myPlayers = () => state?.players.filter((p) => isMine(p.id)) ?? [];
+
 function findMyCard(iid) {
-  const p = me();
-  for (const [zone, cards] of Object.entries(p?.zones ?? {})) {
-    const card = cards.find((c) => c.iid === iid);
-    if (card) return { card, zone };
+  for (const p of myPlayers()) {
+    for (const [zone, cards] of Object.entries(p.zones)) {
+      const card = cards.find((c) => c.iid === iid);
+      if (card) return { card, zone, pid: p.id };
+    }
   }
   if (zoneView?.library) {
     const card = zoneView.cards.find((c) => c.iid === iid);
-    if (card) return { card, zone: 'library' };
+    if (card) return { card, zone: 'library', pid: zoneView.pid };
   }
   return null;
 }
+/** Cualquier carta visible para mí, en cualquier jugador. */
+function findVisibleCard(iid) {
+  for (const p of state?.players ?? []) {
+    for (const [zone, cards] of Object.entries(p.zones)) {
+      const card = cards.find((c) => c.iid === iid);
+      if (card) return { card, zone, pid: p.id };
+    }
+  }
+  return findMyCard(iid);
+}
 const cardImage = (c) => (c.faceDown ? null : c.transformed && c.backImage ? c.backImage : c.image);
+const allBattlefield = () => state.players.flatMap((p) => p.zones.battlefield.map((card) => ({ card, pid: p.id })));
 
 // ---------- Render ----------
 function render() {
   if (!state) return;
   $('#room-code').textContent = state.code;
+  $('#btn-copy').classList.toggle('hidden', state.solo);
+  $('#solo-chip').classList.toggle('hidden', !state.solo);
+  $('#btn-seat').classList.toggle('hidden', !state.solo);
   $('#turn-num').textContent = state.turn;
   const active = playerById(state.activePlayerId);
   $('#turn-player').textContent = active?.name ?? '—';
@@ -140,12 +174,12 @@ function render() {
   oppBox.replaceChildren(...opps.map((p) => renderPanel(p)));
   const mine = me();
   $('#me').replaceChildren(mine ? renderPanel(mine) : '');
-  renderHand(mine);
+  renderHand();
   renderLog();
   if (zoneView && !zoneView.library) renderZoneModal();
 }
 
-function renderCard(c, { owner, zone }) {
+function renderCard(c, { owner, zone, att = 0 }) {
   const mine = isMine(owner);
   const img = cardImage(c);
   const classes = ['card'];
@@ -153,6 +187,7 @@ function renderCard(c, { owner, zone }) {
   if (c.faceDown) classes.push('back');
   else if (!img) classes.push('noimg');
   if (c.token) classes.push('token');
+  if (att) classes.push('attached');
   const el = h('div', {
     class: classes.join(' '),
     dataset: { iid: c.iid, zone, owner },
@@ -163,9 +198,15 @@ function renderCard(c, { owner, zone }) {
   if (c.counters) el.append(h('span', { class: `badge${c.counters < 0 ? ' neg' : ''}` }, c.counters > 0 ? `+${c.counters}` : c.counters));
   if (c.token) el.append(h('span', { class: 'tag' }, 'TOKEN'));
   else if (c.faceDown && mine && zone === 'battlefield') el.append(h('span', { class: 'tag' }, 'OCULTA'));
+  // Carta controlada por alguien que no es su dueño: marca con el color del dueño.
+  if (zone === 'battlefield' && c.ownerId && c.ownerId !== owner) {
+    const ownerP = playerById(c.ownerId);
+    if (ownerP) el.append(h('span', { class: 'tag ctl', style: { '--ctl': ownerP.color }, title: `Dueño: ${ownerP.name}` }, ownerP.name.slice(0, 8)));
+  }
   if (zone === 'battlefield') {
     el.style.setProperty('--x', c.x);
     el.style.setProperty('--y', c.y);
+    if (att) el.style.setProperty('--att', att);
   }
   if (mine) el.dataset.drag = '1';
   el.addEventListener('mouseenter', () => { hovered = { iid: c.iid, zone, owner }; showPreview(c, mine); });
@@ -173,17 +214,50 @@ function renderCard(c, { owner, zone }) {
   return el;
 }
 
+/** Campo de batalla de un jugador, con las cartas adjuntas (de cualquiera) bajo su anfitrión. */
+function renderBattlefield(p, mine) {
+  const field = allBattlefield();
+  const onField = new Set(field.map((x) => x.card.iid));
+  const attachedTo = new Map(); // hostIid -> [{card, pid}]
+  for (const x of field) {
+    if (x.card.attachedTo && onField.has(x.card.attachedTo)) {
+      if (!attachedTo.has(x.card.attachedTo)) attachedTo.set(x.card.attachedTo, []);
+      attachedTo.get(x.card.attachedTo).push(x);
+    }
+  }
+  const els = [];
+  const pushWithAttachments = (card, pid) => {
+    const atts = attachedTo.get(card.iid) ?? [];
+    atts.forEach((a, i) => {
+      // El adjunto se dibuja en la posición de su anfitrión, asomando por arriba.
+      const el = renderCard({ ...a.card, x: card.x, y: card.y }, { owner: a.pid, zone: 'battlefield', att: atts.length - i });
+      el.title = `${el.title} (adjunta a ${card.faceDown ? 'una carta' : card.name})`;
+      els.push(el);
+    });
+    const hostEl = renderCard(card, { owner: pid, zone: 'battlefield' });
+    if (atts.length) hostEl.classList.add('host');
+    els.push(hostEl);
+  };
+  for (const card of p.zones.battlefield) {
+    if (card.attachedTo && onField.has(card.attachedTo)) continue; // se dibuja junto a su anfitrión
+    pushWithAttachments(card, p.id);
+  }
+  const bf = h('div', { class: 'battlefield', dataset: { owner: p.id, ...(mine ? { drop: 'battlefield' } : {}) } }, ...els);
+  if (!p.zones.battlefield.length && !els.length) {
+    bf.append(h('div', { class: 'empty-hint' }, mine ? (p.hasDeck ? 'Arrastra cartas aquí para jugarlas' : 'Carga el mazo con el botón «Mazo»') : (p.hasDeck ? '' : 'Esperando su mazo…')));
+  }
+  return bf;
+}
+
 function pile(p, zone) {
   const mine = isMine(p.id);
   const count = p.counts[zone];
-  const el = h('div', { class: 'pile', dataset: { pile: zone, owner: p.id, ...(mine ? { drop: zone } : {}) }, title: `${ZONE_NAMES[zone]} (${count})` });
+  const el = h('div', { class: 'pile', dataset: { pile: zone, owner: p.id, ...(mine ? { drop: zone } : {}) }, title: `${ZONE_NAMES[zone]} (${count})${!mine && zone === 'library' ? ' · clic derecho: acciones' : ''}` });
   if (zone === 'library') {
-    if (count) el.append(h('div', { class: 'card back' }));
-    else el.append(h('div', { class: 'pile-empty' }));
+    el.append(count ? h('div', { class: 'card back' }) : h('div', { class: 'pile-empty' }));
   } else {
     const top = p.zones[zone]?.at(-1);
-    if (top) el.append(renderCard(top, { owner: p.id, zone }));
-    else el.append(h('div', { class: 'pile-empty' }));
+    el.append(top ? renderCard(top, { owner: p.id, zone }) : h('div', { class: 'pile-empty' }));
   }
   el.append(h('span', { class: 'pile-label' }, `${zone === 'library' ? 'Biblio' : zone === 'graveyard' ? 'Cement.' : 'Exilio'} ${count}`));
   return el;
@@ -191,10 +265,12 @@ function pile(p, zone) {
 
 function renderPanel(p) {
   const mine = isMine(p.id);
+  const isMe = p.id === state.you;
+  const isSeat = Boolean(p.controlledBy);
   const others = state.players.filter((o) => o.id !== p.id);
   const lifeBtn = (delta, label) => h('button', {
     title: 'Shift: ±5',
-    onclick: (e) => send({ type: 'life', delta: e.shiftKey ? delta * 5 : delta }),
+    onclick: (e) => act(p.id, { type: 'life', delta: e.shiftKey ? delta * 5 : delta }),
   }, label);
 
   const cmdStats = others.map((o) => {
@@ -204,48 +280,61 @@ function renderPanel(p) {
       class: `stat${mine ? ' click' : ''}${dmg >= 21 ? ' lethal' : ''}`,
       style: { borderColor: dmg >= 21 ? '' : o.color },
       title: mine ? `Daño de comandante recibido de ${o.name}. Clic +1, clic derecho −1` : `Daño de comandante de ${o.name}`,
-      onclick: mine ? () => send({ type: 'cmdDamage', source: o.id, delta: 1 }) : null,
-      oncontextmenu: mine ? (e) => { e.preventDefault(); send({ type: 'cmdDamage', source: o.id, delta: -1 }); } : null,
+      onclick: mine ? () => act(p.id, { type: 'cmdDamage', source: o.id, delta: 1 }) : null,
+      oncontextmenu: mine ? (e) => { e.preventDefault(); act(p.id, { type: 'cmdDamage', source: o.id, delta: -1 }); } : null,
     }, `⚔ ${o.name.slice(0, 10)} ${dmg}`);
   });
 
   const poison = (mine || p.poison) ? h('span', {
     class: `stat${mine ? ' click' : ''}${p.poison >= 10 ? ' lethal' : ''}`,
     title: mine ? 'Veneno. Clic +1, clic derecho −1' : 'Veneno',
-    onclick: mine ? () => send({ type: 'poison', delta: 1 }) : null,
-    oncontextmenu: mine ? (e) => { e.preventDefault(); send({ type: 'poison', delta: -1 }); } : null,
+    onclick: mine ? () => act(p.id, { type: 'poison', delta: 1 }) : null,
+    oncontextmenu: mine ? (e) => { e.preventDefault(); act(p.id, { type: 'poison', delta: -1 }); } : null,
   }, `☠ ${p.poison}`) : null;
 
+  const handChip = !mine ? h('span', {
+    class: 'counts click',
+    title: 'Clic: acciones sobre su mano y biblioteca',
+    onclick: (e) => opponentZoneMenu(e, p),
+  }, `✋ ${p.counts.hand} · 📚 ${p.counts.library}`) : null;
+
   const head = h('div', { class: 'panel-head' },
-    h('span', { class: 'pname' }, h('span', { class: `dot${p.connected ? '' : ' off'}`, title: p.connected ? 'Conectado' : 'Desconectado' }), p.name, mine ? h('span', { class: 'muted small' }, '(tú)') : null),
+    h('span', { class: 'pname' },
+      h('span', { class: `dot${p.connected ? '' : ' off'}`, title: p.connected ? 'Conectado' : 'Desconectado' }), p.name,
+      isMe ? h('span', { class: 'muted small' }, '(tú)') : null,
+      isSeat && mine ? h('span', { class: 'muted small' }, '(asiento)') : null,
+      isSeat && mine ? h('button', { class: 'seat-x', title: 'Quitar asiento', onclick: () => confirm(`¿Quitar el asiento ${p.name}?`) && send({ type: 'removeSeat', target: p.id }) }, '×') : null),
     h('span', { class: 'cmdnames' }, p.commanderNames.join(' + ')),
-    !mine ? h('span', { class: 'counts' }, `✋ ${p.counts.hand} · 📚 ${p.counts.library}`) : null,
-    poison, ...cmdStats,
+    isSeat && mine ? h('button', { class: 'btn small ghost', onclick: () => openDeckModal(p.id) }, 'Mazo') : null,
+    handChip, poison, ...cmdStats,
     h('span', { class: 'life' }, mine ? lifeBtn(-1, '−') : null, h('b', { title: 'Vida' }, p.life), mine ? lifeBtn(1, '+') : null),
   );
 
   const command = h('div', { class: 'pile cmd', dataset: { pile: 'command', owner: p.id, ...(mine ? { drop: 'command' } : {}) }, title: 'Zona de mando' });
   const cmdTop = p.zones.command.at(-1);
-  if (cmdTop) command.append(renderCard(cmdTop, { owner: p.id, zone: 'command' }));
-  else command.append(h('div', { class: 'pile-empty' }));
+  command.append(cmdTop ? renderCard(cmdTop, { owner: p.id, zone: 'command' }) : h('div', { class: 'pile-empty' }));
   command.append(h('span', { class: 'pile-label' }, `Mando ${p.counts.command}`));
 
-  const bf = h('div', { class: 'battlefield', dataset: { owner: p.id, ...(mine ? { drop: 'battlefield' } : {}) } },
-    ...p.zones.battlefield.map((c) => renderCard(c, { owner: p.id, zone: 'battlefield' })));
-  if (!p.zones.battlefield.length) bf.append(h('div', { class: 'empty-hint' }, mine ? (p.hasDeck ? 'Arrastra cartas aquí para jugarlas' : 'Carga tu mazo con el botón «Mazo»') : (p.hasDeck ? '' : 'Esperando su mazo…')));
-
-  return h('div', { class: `panel${mine ? ' mine' : ' opp'}${state.activePlayerId === p.id ? ' active' : ''}`, style: { '--pc': p.color }, dataset: { pid: p.id } },
+  return h('div', { class: `panel${isMe ? ' mine' : ' opp'}${state.activePlayerId === p.id ? ' active' : ''}`, style: { '--pc': p.color }, dataset: { pid: p.id } },
     head,
-    h('div', { class: 'panel-body' }, h('div', { class: 'zones' }, command, pile(p, 'library'), pile(p, 'graveyard'), pile(p, 'exile')), bf),
+    h('div', { class: 'panel-body' }, h('div', { class: 'zones' }, command, pile(p, 'library'), pile(p, 'graveyard'), pile(p, 'exile')), renderBattlefield(p, mine)),
   );
 }
 
-function renderHand(p) {
+function renderHand() {
+  const seats = myPlayers();
+  const p = playerById(handSeat) ?? me();
   const hand = p?.zones.hand ?? [];
   $('#hand-count').textContent = `(${hand.length})`;
+  $('#hand').dataset.owner = p?.id ?? '';
+  $('#hand-tabs').replaceChildren(...(seats.length > 1 ? seats.map((s) => h('button', {
+    class: s.id === p?.id ? 'on' : '',
+    style: { '--pc': s.color },
+    onclick: () => { handSeat = s.id; renderHand(); },
+  }, s.id === state.you ? 'Tú' : s.name)) : []));
   $('#hand').replaceChildren(...hand.map((c) => {
     const el = renderCard(c, { owner: p.id, zone: 'hand' });
-    el.addEventListener('dblclick', () => send({ type: 'move', iid: c.iid, to: 'battlefield', x: 0.4 + Math.random() * 0.2, y: 0.55 }));
+    el.addEventListener('dblclick', () => act(p.id, { type: 'move', iid: c.iid, to: 'battlefield', x: 0.4 + Math.random() * 0.2, y: 0.55 }));
     return el;
   }));
 }
@@ -268,14 +357,37 @@ function showPreview(c, mine) {
   box.replaceChildren(src ? h('img', { src, alt: c.name }) : h('div', { class: 'preview-name' }, c.name, h('br'), h('span', { class: 'muted small' }, c.typeLine ?? '')));
 }
 
+// ---------- Apuntar (adjuntar) ----------
+function startTargeting(iid, pid, name) {
+  targeting = { iid, pid, name };
+  document.body.classList.add('targeting');
+  const banner = $('#target-banner');
+  banner.textContent = `Elige el permanente al que adjuntar ${name} · Esc para cancelar`;
+  banner.classList.remove('hidden');
+}
+function stopTargeting() {
+  targeting = null;
+  document.body.classList.remove('targeting');
+  $('#target-banner').classList.add('hidden');
+}
+document.addEventListener('pointerdown', (e) => {
+  if (!targeting) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const el = e.target.closest('.battlefield .card');
+  const t = targeting;
+  stopTargeting();
+  if (el && el.dataset.iid !== t.iid) act(t.pid, { type: 'attach', iid: t.iid, target: el.dataset.iid });
+}, true);
+
 // ---------- Arrastrar y soltar ----------
 let drag = null;
 document.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0) return;
+  if (e.button !== 0 || targeting) return;
   const el = e.target.closest('.card[data-drag]');
   if (!el || el.closest('.modal')) return;
   const rect = el.getBoundingClientRect();
-  drag = { el, iid: el.dataset.iid, zone: el.dataset.zone, startX: e.clientX, startY: e.clientY, offX: e.clientX - rect.left, offY: e.clientY - rect.top, moved: false, ghost: null };
+  drag = { el, iid: el.dataset.iid, zone: el.dataset.zone, owner: el.dataset.owner, startX: e.clientX, startY: e.clientY, offX: e.clientX - rect.left, offY: e.clientY - rect.top, moved: false, ghost: null };
 });
 document.addEventListener('pointermove', (e) => {
   if (!drag) return;
@@ -285,7 +397,7 @@ document.addEventListener('pointermove', (e) => {
     const ghost = drag.el.cloneNode(true);
     const r = drag.el.getBoundingClientRect();
     ghost.classList.add('ghost');
-    ghost.classList.remove('tapped');
+    ghost.classList.remove('tapped', 'attached');
     ghost.style.width = `${drag.el.offsetWidth}px`;
     ghost.style.left = `${r.left}px`;
     ghost.style.top = `${r.top}px`;
@@ -297,7 +409,7 @@ document.addEventListener('pointermove', (e) => {
   drag.ghost.style.left = `${e.clientX - drag.offX}px`;
   drag.ghost.style.top = `${e.clientY - drag.offY}px`;
   document.querySelectorAll('.drop-hover').forEach((n) => n.classList.remove('drop-hover'));
-  dropTarget(e)?.classList.add('drop-hover');
+  dropTarget(e, drag.owner)?.classList.add('drop-hover');
 });
 document.addEventListener('pointerup', (e) => {
   if (!drag) return;
@@ -307,7 +419,7 @@ document.addEventListener('pointerup', (e) => {
   d.el.classList.remove('dragging-src');
   d.ghost?.remove();
   if (!d.moved) return onCardClick(d);
-  const target = dropTarget(e);
+  const target = dropTarget(e, d.owner);
   if (!target) return;
   const to = target.dataset.drop;
   if (to === 'battlefield') {
@@ -316,18 +428,19 @@ document.addEventListener('pointerup', (e) => {
     const ch = cw * 1.397;
     const x = Math.min(1, Math.max(0, (e.clientX - d.offX * (cw / d.w) - r.left) / Math.max(1, r.width - cw)));
     const y = Math.min(1, Math.max(0, (e.clientY - d.offY * (cw / d.w) - r.top) / Math.max(1, r.height - ch)));
-    send(d.zone === 'battlefield' ? { type: 'setPos', iid: d.iid, x, y } : { type: 'move', iid: d.iid, to, x, y });
+    act(d.owner, d.zone === 'battlefield' ? { type: 'setPos', iid: d.iid, x, y } : { type: 'move', iid: d.iid, to, x, y });
   } else if (to !== d.zone || to === 'library') {
-    send({ type: 'move', iid: d.iid, to, position: to === 'library' && e.shiftKey ? 'bottom' : 'top' });
+    act(d.owner, { type: 'move', iid: d.iid, to, position: to === 'library' && e.shiftKey ? 'bottom' : 'top' });
   }
 });
-function dropTarget(e) {
+/** Solo se suelta en zonas del mismo asiento que controla la carta. */
+function dropTarget(e, owner) {
   const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-drop]');
-  return el && (el.dataset.owner === undefined || isMine(el.dataset.owner)) ? el : null;
+  return el && el.dataset.owner === owner ? el : null;
 }
 function onCardClick(d) {
-  if (d.zone === 'battlefield') send({ type: 'tap', iid: d.iid });
-  else if (d.zone === 'graveyard' || d.zone === 'exile' || d.zone === 'command') openZone(state.you, d.zone);
+  if (d.zone === 'battlefield') act(d.owner, { type: 'tap', iid: d.iid });
+  else if (d.zone === 'graveyard' || d.zone === 'exile' || d.zone === 'command') openZone(d.owner, d.zone);
 }
 
 // Clic en las pilas (biblioteca: robar; cementerio/exilio: ver).
@@ -335,7 +448,7 @@ document.addEventListener('click', (e) => {
   const pileEl = e.target.closest('.pile');
   if (!pileEl || e.target.closest('.card[data-drag]')) return;
   const { pile: zone, owner } = pileEl.dataset;
-  if (zone === 'library') { if (isMine(owner)) send({ type: 'draw', n: 1 }); }
+  if (zone === 'library') { if (isMine(owner)) act(owner, { type: 'draw', n: 1 }); }
   else openZone(owner, zone);
 });
 
@@ -344,12 +457,12 @@ const menu = $('#menu');
 function openMenu(x, y, title, items) {
   menu.replaceChildren(
     ...(title ? [h('div', { class: 'menu-title' }, title)] : []),
-    ...items.map((it) => (it === '-' ? h('hr') : h('button', { onclick: () => { closeMenu(); it.run(); } }, it.label, it.key ? h('kbd', {}, it.key) : null))),
+    ...items.filter(Boolean).map((it) => (it === '-' ? h('hr') : h('button', { onclick: () => { closeMenu(); it.run(); } }, it.label, it.key ? h('kbd', {}, it.key) : null))),
   );
   menu.classList.remove('hidden');
   const r = menu.getBoundingClientRect();
-  menu.style.left = `${Math.min(x, innerWidth - r.width - 8)}px`;
-  menu.style.top = `${Math.min(y, innerHeight - r.height - 8)}px`;
+  menu.style.left = `${Math.max(8, Math.min(x, innerWidth - r.width - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(y, innerHeight - r.height - 8))}px`;
 }
 const closeMenu = () => menu.classList.add('hidden');
 document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#menu')) closeMenu(); }, true);
@@ -361,75 +474,118 @@ const askNumber = (msg, def = 1) => {
   return Number.isFinite(n) && n > 0 ? n : null;
 };
 
-function moveItems(iid, from) {
-  const mv = (to, label, position) => ({ label, run: () => afterLibraryMove(iid, send({ type: 'move', iid, to, position, x: 0.45, y: 0.5 })) });
+function moveItems(pid, iid, from) {
+  const mv = (to, label, position) => ({ label, run: () => afterLibraryMove(iid, act(pid, { type: 'move', iid, to, position, x: 0.45, y: 0.5 })) });
   return [
     from !== 'battlefield' && mv('battlefield', 'Al campo de batalla'),
-    from !== 'battlefield' && { label: 'Al campo boca abajo', run: () => afterLibraryMove(iid, send({ type: 'move', iid, to: 'battlefield', faceDown: true, x: 0.45, y: 0.5 })) },
+    from !== 'battlefield' && { label: 'Al campo boca abajo', run: () => afterLibraryMove(iid, act(pid, { type: 'move', iid, to: 'battlefield', faceDown: true, x: 0.45, y: 0.5 })) },
     from !== 'hand' && mv('hand', 'A la mano'),
     from !== 'graveyard' && mv('graveyard', 'Al cementerio'),
     from !== 'exile' && mv('exile', 'Al exilio'),
     mv('library', 'Al tope de la biblioteca', 'top'),
     mv('library', 'Al fondo de la biblioteca', 'bottom'),
     from !== 'command' && mv('command', 'A la zona de mando'),
-  ].filter(Boolean);
+  ];
 }
 
 function cardMenu(e, iid, zone) {
   const found = findMyCard(iid);
   if (!found) return;
-  const c = found.card;
+  const { card: c, pid } = found;
+  const others = state.players.filter((o) => o.id !== pid);
   const items = [];
   if (zone === 'battlefield') {
     items.push(
-      { label: c.tapped ? 'Enderezar' : 'Girar', key: 'T', run: () => send({ type: 'tap', iid }) },
-      { label: c.faceDown ? 'Voltear boca arriba' : 'Poner boca abajo', key: 'F', run: () => send({ type: 'flip', iid }) },
-      c.backImage && { label: 'Transformar', run: () => send({ type: 'transform', iid }) },
-      { label: 'Agregar contador +1', key: '+', run: () => send({ type: 'counters', iid, delta: 1 }) },
-      { label: 'Quitar contador −1', key: '−', run: () => send({ type: 'counters', iid, delta: -1 }) },
-      { label: 'Contadores…', run: () => { const v = prompt('Cantidad a sumar (usa negativo para restar)', '1'); const n = Number.parseInt(v ?? '', 10); if (n) send({ type: 'counters', iid, delta: n }); } },
-      { label: 'Crear copia (token)', run: () => send({ type: 'clone', iid }) },
+      { label: c.tapped ? 'Enderezar' : 'Girar', key: 'T', run: () => act(pid, { type: 'tap', iid }) },
+      { label: c.faceDown ? 'Voltear boca arriba' : 'Poner boca abajo', key: 'F', run: () => act(pid, { type: 'flip', iid }) },
+      c.backImage && { label: 'Transformar', run: () => act(pid, { type: 'transform', iid }) },
+      { label: 'Agregar contador +1', key: '+', run: () => act(pid, { type: 'counters', iid, delta: 1 }) },
+      { label: 'Quitar contador −1', key: '−', run: () => act(pid, { type: 'counters', iid, delta: -1 }) },
+      { label: 'Contadores…', run: () => { const n = Number.parseInt(prompt('Cantidad a sumar (usa negativo para restar)', '1') ?? '', 10); if (n) act(pid, { type: 'counters', iid, delta: n }); } },
+      '-',
+      { label: '📎 Adjuntar a…', run: () => startTargeting(iid, pid, c.faceDown ? 'la carta' : c.name) },
+      c.attachedTo && { label: 'Desadjuntar', run: () => act(pid, { type: 'detach', iid }) },
+      ...others.map((o) => ({ label: `🤝 Dar control a ${o.name}`, run: () => act(pid, { type: 'giveControl', iid, to: o.id }) })),
+      '-',
+      ...(c.tokens ?? []).map((t) => ({ label: `✨ Crear token: ${t.name}`, run: () => createRelatedToken(pid, t, c) })),
+      { label: 'Crear copia (token)', run: () => act(pid, { type: 'clone', iid }) },
       '-',
     );
+  } else if (c.tokens?.length) {
+    items.push(...c.tokens.map((t) => ({ label: `✨ Crear token: ${t.name}`, run: () => createRelatedToken(pid, t) })), '-');
   }
   if (zone !== 'library' && zone !== 'hand' && !c.faceDown) {
-    items.push({ label: '⚡ Anunciar trigger de esta carta', key: 'G', run: () => send({ type: 'announce', kind: 'trigger', iid }) }, '-');
+    items.push({ label: '⚡ Anunciar trigger de esta carta', key: 'G', run: () => act(pid, { type: 'announce', kind: 'trigger', iid }) }, '-');
   }
-  items.push(...moveItems(iid, zone));
-  if (zone !== 'library' || zoneView?.library) items.push('-', { label: 'Revelar a todos', run: () => send({ type: 'reveal', iid }) });
-  openMenu(e.clientX, e.clientY, c.faceDown && zone !== 'battlefield' ? 'Carta' : c.name, items.filter(Boolean));
+  if (c.scryfallId) items.push({ label: '📖 Ver ficha (oráculo y rulings)', run: () => openCardInfo(c) }, '-');
+  items.push(...moveItems(pid, iid, zone));
+  if (zone !== 'library' || zoneView?.library) items.push('-', { label: 'Revelar a todos', run: () => act(pid, { type: 'reveal', iid }) });
+  openMenu(e.clientX, e.clientY, c.faceDown && zone !== 'battlefield' ? 'Carta' : c.name, items);
 }
 
-function libraryMenu(e) {
-  openMenu(e.clientX, e.clientY, 'Biblioteca', [
-    { label: 'Robar 1', key: 'D', run: () => send({ type: 'draw', n: 1 }) },
-    { label: 'Robar X…', run: () => { const n = askNumber('¿Cuántas cartas robar?', 7); if (n) send({ type: 'draw', n }); } },
-    { label: 'Moler X…', run: () => { const n = askNumber('¿Cuántas cartas moler?', 1); if (n) send({ type: 'mill', n }); } },
-    { label: 'Mirar el tope X…', run: () => { const n = askNumber('¿Cuántas cartas mirar?', 3); if (n) peekLibrary(n); } },
-    { label: 'Buscar en la biblioteca', run: () => peekLibrary(0) },
-    { label: 'Barajar', run: () => send({ type: 'shuffle' }) },
+function libraryMenu(e, pid) {
+  openMenu(e.clientX, e.clientY, `Biblioteca${pid !== state.you ? ` de ${playerById(pid)?.name}` : ''}`, [
+    { label: 'Robar 1', key: 'D', run: () => act(pid, { type: 'draw', n: 1 }) },
+    { label: 'Robar X…', run: () => { const n = askNumber('¿Cuántas cartas robar?', 7); if (n) act(pid, { type: 'draw', n }); } },
+    { label: 'Moler X…', run: () => { const n = askNumber('¿Cuántas cartas moler?', 1); if (n) act(pid, { type: 'mill', n }); } },
+    { label: 'Mirar el tope X…', run: () => { const n = askNumber('¿Cuántas cartas mirar?', 3); if (n) peekLibrary(pid, n); } },
+    { label: 'Buscar en la biblioteca', run: () => peekLibrary(pid, 0) },
+    { label: 'Barajar', run: () => act(pid, { type: 'shuffle' }) },
     '-',
-    { label: 'Mulligan (mano a la biblioteca y robar 7)', run: () => confirm('¿Hacer mulligan?') && send({ type: 'mulligan' }) },
-    { label: 'Revelar mi mano', run: () => send({ type: 'revealHand' }) },
-    { label: 'Enderezar todo', key: 'U', run: () => send({ type: 'untapAll' }) },
+    { label: 'Mulligan (mano a la biblioteca y robar 7)', run: () => confirm('¿Hacer mulligan?') && act(pid, { type: 'mulligan' }) },
+    { label: 'Revelar la mano', run: () => act(pid, { type: 'revealHand' }) },
+    { label: 'Enderezar todo', key: 'U', run: () => act(pid, { type: 'untapAll' }) },
     '-',
-    { label: 'Reiniciar mi partida', run: () => confirm('Todas tus cartas vuelven a la biblioteca y la vida a 40. ¿Seguro?') && send({ type: 'reset' }) },
+    { label: 'Reiniciar la partida', run: () => confirm('Todas las cartas vuelven a la biblioteca y la vida a 40. ¿Seguro?') && act(pid, { type: 'reset' }) },
+  ]);
+}
+
+/** Acciones sobre la biblioteca y la mano de un rival (todo queda en el log). */
+function opponentZoneMenu(e, target) {
+  const tz = (op, n) => send({ type: 'targetZone', target: target.id, op, n });
+  openMenu(e.clientX, e.clientY, `Zonas de ${target.name}`, [
+    { label: 'Moler X de su biblioteca…', run: () => { const n = askNumber(`¿Cuántas cartas moler a ${target.name}?`, 1); if (n) tz('mill', n); } },
+    { label: 'Exiliar X del tope de su biblioteca…', run: () => { const n = askNumber('¿Cuántas cartas exiliar?', 1); if (n) tz('exileTop', n); } },
+    { label: 'Revelar X del tope de su biblioteca…', run: () => { const n = askNumber('¿Cuántas cartas revelar?', 1); if (n) tz('revealTop', n); } },
+    '-',
+    { label: 'Hacer que descarte una carta al azar', run: () => confirm(`¿${target.name} descarta al azar?`) && tz('discardRandom') },
+    { label: 'Pedirle que revele su mano', run: () => tz('requestHand') },
+    '-',
+    { label: 'Ver su cementerio', run: () => openZone(target.id, 'graveyard') },
+    { label: 'Ver su exilio', run: () => openZone(target.id, 'exile') },
   ]);
 }
 
 document.addEventListener('contextmenu', (e) => {
   if (e.target.closest('input, textarea')) return;
+  if (targeting) { e.preventDefault(); return stopTargeting(); }
   const cardEl = e.target.closest('.card[data-drag]');
+  const anyCard = e.target.closest('.card[data-iid]');
   const pileEl = e.target.closest('.pile');
   const bf = e.target.closest('.battlefield[data-drop]');
   if (cardEl) { e.preventDefault(); return cardMenu(e, cardEl.dataset.iid, cardEl.dataset.lib ? 'library' : cardEl.dataset.zone); }
-  if (pileEl?.dataset.pile === 'library' && isMine(pileEl.dataset.owner)) { e.preventDefault(); return libraryMenu(e); }
+  if (pileEl?.dataset.pile === 'library') {
+    e.preventDefault();
+    const owner = pileEl.dataset.owner;
+    return isMine(owner) ? libraryMenu(e, owner) : opponentZoneMenu(e, playerById(owner));
+  }
+  if (anyCard) {
+    // Carta de un rival: solo lectura.
+    const found = findVisibleCard(anyCard.dataset.iid);
+    if (found?.card.scryfallId && !found.card.faceDown) {
+      e.preventDefault();
+      return openMenu(e.clientX, e.clientY, found.card.name, [{ label: '📖 Ver ficha (oráculo y rulings)', run: () => openCardInfo(found.card) }]);
+    }
+  }
   if (bf) {
     e.preventDefault();
+    const pid = bf.dataset.owner;
+    const r = bf.getBoundingClientRect();
+    const pos = { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width - 0.03)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height - 0.1)) };
     openMenu(e.clientX, e.clientY, 'Campo de batalla', [
-      { label: 'Enderezar todo', key: 'U', run: () => send({ type: 'untapAll' }) },
-      { label: 'Crear token…', run: createToken },
-      { label: 'Lanzar d20', run: () => send({ type: 'roll', sides: 20 }) },
+      { label: 'Enderezar todo', key: 'U', run: () => act(pid, { type: 'untapAll' }) },
+      { label: 'Crear token…', run: () => openTokenModal(pid, pos) },
+      { label: 'Lanzar d20', run: () => act(pid, { type: 'roll', sides: 20 }) },
     ]);
   }
 });
@@ -453,10 +609,11 @@ function renderZoneModal() {
   const grid = $('#zone-cards');
   $('#btn-zone-shuffle').classList.toggle('hidden', !zoneView?.library);
   if (zoneView.library) {
-    $('#zone-title').textContent = zoneView.n ? `Tope de tu biblioteca (${zoneView.cards.length})` : `Tu biblioteca (${zoneView.cards.length})`;
+    const who = zoneView.pid === state.you ? 'tu biblioteca' : `la biblioteca de ${playerById(zoneView.pid)?.name}`;
+    $('#zone-title').textContent = zoneView.n ? `Tope de ${who} (${zoneView.cards.length})` : `Buscar en ${who} (${zoneView.cards.length})`;
     $('#zone-hint').textContent = 'Ordenadas desde el tope. Clic en una carta para moverla. Tus rivales no ven estas cartas.';
     grid.replaceChildren(...zoneView.cards.map((c) => {
-      const el = renderCard(c, { owner: state.you, zone: 'library' });
+      const el = renderCard(c, { owner: zoneView.pid, zone: 'library' });
       delete el.dataset.drag;
       el.dataset.lib = '1';
       el.addEventListener('click', (e) => cardMenu(e, c.iid, 'library'));
@@ -468,8 +625,8 @@ function renderZoneModal() {
   if (!p) return closeModal('#modal-zone');
   const cards = [...(p.zones[zoneView.zone] ?? [])].reverse();
   const mine = isMine(p.id);
-  $('#zone-title').textContent = `${ZONE_NAMES[zoneView.zone]} de ${mine ? 'ti' : p.name} (${cards.length})`;
-  $('#zone-hint').textContent = mine ? 'La más reciente primero. Clic en una carta para moverla.' : 'Solo lectura.';
+  $('#zone-title').textContent = `${ZONE_NAMES[zoneView.zone]} de ${p.id === state.you ? 'ti' : p.name} (${cards.length})`;
+  $('#zone-hint').textContent = mine ? 'La más reciente primero. Clic en una carta para moverla.' : 'Solo lectura. Clic derecho en una carta para ver su ficha.';
   grid.replaceChildren(...cards.map((c) => {
     const el = renderCard(c, { owner: p.id, zone: zoneView.zone });
     delete el.dataset.drag;
@@ -478,10 +635,10 @@ function renderZoneModal() {
   }));
 }
 
-async function peekLibrary(n) {
-  const res = await send({ type: 'peek', n });
+async function peekLibrary(pid, n) {
+  const res = await act(pid, { type: 'peek', n });
   if (!res?.ok) return;
-  zoneView = { library: true, n, cards: res.private.cards };
+  zoneView = { library: true, pid, n, cards: res.private.cards };
   renderZoneModal();
   openModal('#modal-zone');
 }
@@ -492,18 +649,22 @@ async function afterLibraryMove(iid, promise) {
     renderZoneModal();
   }
 }
-$('#btn-zone-shuffle').addEventListener('click', () => { send({ type: 'shuffle' }); closeModal('#modal-zone'); });
+$('#btn-zone-shuffle').addEventListener('click', () => { act(zoneView?.pid, { type: 'shuffle' }); closeModal('#modal-zone'); });
 
-// Mazo
-function openDeckModal() {
+// ---------- Mazo ----------
+function openDeckModal(pid = state?.you) {
+  deckFor = pid;
   const saved = store.get('edh.deck', {});
-  $('#deck-commanders').value = saved.commanders ?? '';
-  $('#deck-list').value = saved.list ?? '';
+  const forSeat = pid && pid !== state?.you;
+  $('#deck-for').textContent = forSeat ? `Para el asiento: ${playerById(pid)?.name}` : '';
+  $('#deck-for').classList.toggle('hidden', !forSeat);
+  $('#deck-commanders').value = forSeat ? '' : saved.commanders ?? '';
+  $('#deck-list').value = forSeat ? '' : saved.list ?? '';
   $('#deck-status').textContent = '';
   $('#deck-status').className = 'status';
   openModal('#modal-deck');
 }
-$('#btn-deck').addEventListener('click', openDeckModal);
+$('#btn-deck').addEventListener('click', () => openDeckModal(state.you));
 $('#btn-deck-load').addEventListener('click', async () => {
   const status = $('#deck-status');
   const btn = $('#btn-deck-load');
@@ -514,13 +675,13 @@ $('#btn-deck-load').addEventListener('click', async () => {
   const parsed = { commanders: [...fromCmd.commanders, ...fromList.commanders], cards: [...fromCmd.cards, ...fromList.cards] };
   const total = [...parsed.commanders, ...parsed.cards].reduce((s, e) => s + e.qty, 0);
   if (!total) { status.textContent = 'La lista está vacía.'; status.className = 'status err'; return; }
-  store.set('edh.deck', { commanders: cmdText, list: listText });
+  if (deckFor === state.you) store.set('edh.deck', { commanders: cmdText, list: listText });
   btn.disabled = true;
   status.className = 'status';
   status.textContent = `Buscando ${total} cartas en Scryfall…`;
   try {
     const deck = await resolveDeck(parsed, (done, all) => { status.textContent = `Buscando cartas en Scryfall… ${done}/${all}`; });
-    const res = await send({ type: 'setDeck', commanders: deck.commanders, cards: deck.cards });
+    const res = await act(deckFor, { type: 'setDeck', commanders: deck.commanders, cards: deck.cards });
     if (res?.ok) {
       const count = deck.commanders.length + deck.cards.length;
       if (deck.notFound.length) {
@@ -529,7 +690,7 @@ $('#btn-deck-load').addEventListener('click', async () => {
         toast(`Mazo cargado (${count}). Faltaron ${deck.notFound.length}; revisa el modal de mazo.`);
       } else {
         closeModal('#modal-deck');
-        toast(`Mazo cargado: ${count} cartas. ¡Roba 7 con clic derecho en tu biblioteca!`);
+        toast(`Mazo cargado: ${count} cartas. ¡Roba 7 con clic derecho en la biblioteca!`);
       }
     }
   } catch (err) {
@@ -540,16 +701,98 @@ $('#btn-deck-load').addEventListener('click', async () => {
   }
 });
 
-function createToken() {
-  const name = prompt('Nombre del token (ej: Zombi 2/2, Tesoro)', 'Tesoro');
-  if (name?.trim()) send({ type: 'token', name: name.trim() });
+// ---------- Tokens ----------
+function openTokenModal(pid = handSeat ?? state.you, pos = {}) {
+  tokenFor = { pid, ...pos };
+  $('#token-query').value = '';
+  $('#token-results').replaceChildren();
+  $('#token-status').textContent = 'Escribe para buscar tokens con imagen, o crea uno sin imagen.';
+  openModal('#modal-token');
+  setTimeout(() => $('#token-query').focus(), 30);
+}
+let tokenTimer = null;
+$('#token-query').addEventListener('input', () => {
+  clearTimeout(tokenTimer);
+  const q = $('#token-query').value.trim();
+  if (q.length < 2) return;
+  tokenTimer = setTimeout(async () => {
+    $('#token-status').textContent = 'Buscando…';
+    try {
+      const results = await searchTokens(q);
+      if ($('#token-query').value.trim() !== q) return;
+      $('#token-status').textContent = results.length ? `${results.length} resultados. Clic para crear.` : 'Sin resultados; puedes crearlo sin imagen.';
+      $('#token-results').replaceChildren(...results.map((t) => h('div', {
+        class: 'card', style: { backgroundImage: `url("${t.image}")` }, title: `${t.name} — ${t.typeLine}`,
+        onclick: () => { createToken(tokenFor.pid, t, tokenFor); closeModal('#modal-token'); },
+      })));
+    } catch (err) {
+      $('#token-status').textContent = `No se pudo consultar Scryfall: ${err.message}`;
+    }
+  }, 350);
+});
+$('#btn-token-plain').addEventListener('click', () => {
+  const name = $('#token-query').value.trim() || prompt('Nombre del token (ej: Zombi 2/2, Tesoro)', 'Tesoro');
+  if (!name?.trim()) return;
+  createToken(tokenFor.pid, { name: name.trim() }, tokenFor);
+  closeModal('#modal-token');
+});
+function createToken(pid, t, pos = {}) {
+  return act(pid, { type: 'token', name: t.name, image: t.image, backImage: t.backImage, typeLine: t.typeLine, scryfallId: t.scryfallId, x: pos.x, y: pos.y });
+}
+async function createRelatedToken(pid, t, source) {
+  try {
+    const card = await fetchCard(t.id);
+    const pos = source ? { x: Math.min(1, source.x + 0.06), y: Math.min(1, source.y + 0.05) } : {};
+    createToken(pid, card ? toCardData(card) : { name: t.name }, pos);
+  } catch {
+    createToken(pid, { name: t.name });
+  }
+}
+
+// ---------- Ficha de carta ----------
+const LEGAL = { legal: ['ok', 'Legal en Commander'], banned: ['no', 'Prohibida en Commander'], not_legal: ['no', 'No legal en Commander'], restricted: ['no', 'Restringida'] };
+async function openCardInfo(c) {
+  const body = $('#info-body');
+  $('#info-title').textContent = c.name;
+  body.replaceChildren(h('p', { class: 'muted' }, 'Cargando desde Scryfall…'));
+  openModal('#modal-info');
+  try {
+    const [card, rulings] = await Promise.all([fetchCard(c.scryfallId), fetchRulings(c.scryfallId)]);
+    if (!card) return body.replaceChildren(h('p', {}, 'No se encontró la carta en Scryfall.'));
+    const faces = card.card_faces?.length ? card.card_faces : [card];
+    const legal = LEGAL[card.legalities?.commander] ?? ['no', card.legalities?.commander ?? 'Sin datos'];
+    const images = faces.map((f) => f.image_uris?.normal ?? card.image_uris?.normal).filter((v, i, a) => v && a.indexOf(v) === i);
+    body.replaceChildren(
+      h('div', {}, ...images.map((src) => h('img', { src, alt: card.name }))),
+      h('div', {},
+        h('span', { class: `legal ${legal[0]}` }, legal[1]),
+        ...faces.map((f) => h('div', {},
+          h('h3', {}, f.name, f.mana_cost ? h('span', { class: 'muted small' }, `  ${f.mana_cost}`) : null),
+          h('p', { class: 'type' }, f.type_line ?? card.type_line, f.power != null ? ` · ${f.power}/${f.toughness}` : '', f.loyalty ? ` · Lealtad ${f.loyalty}` : ''),
+          f.oracle_text ? h('p', { class: 'oracle' }, f.oracle_text) : null)),
+        h('h3', {}, `Rulings (${rulings.length})`),
+        rulings.length
+          ? h('ul', { class: 'rulings' }, ...rulings.map((r) => h('li', {}, h('time', {}, r.published_at), r.comment)))
+          : h('p', { class: 'muted small' }, 'Sin rulings publicados.'),
+        h('p', { class: 'small' }, h('a', { href: card.scryfall_uri, target: '_blank', rel: 'noopener', style: { color: 'var(--gold)' } }, 'Ver en Scryfall ↗')),
+      ),
+    );
+  } catch (err) {
+    body.replaceChildren(h('p', { class: 'status err' }, `No se pudo consultar Scryfall: ${err.message}`));
+  }
 }
 
 // ---------- Barra superior ----------
 $('#btn-pass').addEventListener('click', () => send({ type: 'passTurn' }));
 $('#btn-d20').addEventListener('click', () => send({ type: 'roll', sides: 20 }));
 $('#btn-coin').addEventListener('click', () => send({ type: 'coin' }));
-$('#btn-token').addEventListener('click', createToken);
+$('#btn-token').addEventListener('click', () => openTokenModal(handSeat ?? state.you));
+$('#btn-seat').addEventListener('click', () => {
+  const name = prompt('Nombre del asiento', `Rival ${state.players.length}`);
+  if (name === null) return;
+  const copyDeck = me()?.hasDeck && confirm('¿Usar tu mismo mazo en el nuevo asiento? (Cancelar = cargarlo después)');
+  send({ type: 'addSeat', name, copyDeck });
+});
 document.querySelectorAll('[data-ann]').forEach((b) => b.addEventListener('click', () => send({ type: 'announce', kind: b.dataset.ann })));
 $('#btn-help').addEventListener('click', () => openModal('#modal-help'));
 $('#btn-copy').addEventListener('click', async () => {
@@ -558,7 +801,7 @@ $('#btn-copy').addEventListener('click', async () => {
   catch { prompt('Copia este enlace:', link); }
 });
 $('#btn-leave').addEventListener('click', async () => {
-  if (!confirm('¿Salir de la sala? Perderás tu asiento y tus cartas.')) return;
+  if (!confirm(state.solo ? '¿Terminar la práctica?' : '¿Salir de la sala? Perderás tu asiento y tus cartas.')) return;
   await emit('leaveRoom');
   store.del('edh.session');
   session = null;
@@ -580,23 +823,25 @@ $('#chat-form').addEventListener('submit', (e) => {
 
 // ---------- Atajos ----------
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && targeting) return stopTargeting();
   if (e.target.closest('input, textarea') || !state || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (!$('#modal-deck').classList.contains('hidden')) return;
+  if (!$('#modal-deck').classList.contains('hidden') || !$('#modal-token').classList.contains('hidden')) return;
   const k = e.key.toLowerCase();
   if (e.key === 'Escape') { closeMenu(); document.querySelectorAll('.modal:not(.hidden)').forEach((m) => closeModal(`#${m.id}`)); return; }
-  if (k === 'd') return send({ type: 'draw', n: 1 });
-  if (k === 'u') return send({ type: 'untapAll' });
+  const seat = handSeat ?? state.you;
+  if (k === 'd') return act(seat, { type: 'draw', n: 1 });
+  if (k === 'u') return act(seat, { type: 'untapAll' });
   if (k === 'r') return send({ type: 'announce', kind: 'respond' });
   if (k === 'g') {
     const pub = hovered && isMine(hovered.owner) && !['hand', 'library'].includes(hovered.zone) ? hovered : null;
-    return send({ type: 'announce', kind: 'trigger', iid: pub?.iid });
+    return act(pub?.owner ?? state.you, { type: 'announce', kind: 'trigger', iid: pub?.iid });
   }
   const hv = hovered && isMine(hovered.owner) && hovered.zone === 'battlefield' ? hovered : null;
   if (!hv) return;
-  if (k === 't') send({ type: 'tap', iid: hv.iid });
-  if (k === 'f') send({ type: 'flip', iid: hv.iid });
-  if (e.key === '+' || e.key === '=') send({ type: 'counters', iid: hv.iid, delta: 1 });
-  if (e.key === '-') send({ type: 'counters', iid: hv.iid, delta: -1 });
+  if (k === 't') act(hv.owner, { type: 'tap', iid: hv.iid });
+  if (k === 'f') act(hv.owner, { type: 'flip', iid: hv.iid });
+  if (e.key === '+' || e.key === '=') act(hv.owner, { type: 'counters', iid: hv.iid, delta: 1 });
+  if (e.key === '-') act(hv.owner, { type: 'counters', iid: hv.iid, delta: -1 });
 });
 
 // ---------- Toasts ----------
@@ -607,16 +852,24 @@ function toast(text, isError = false) {
 }
 function toastCards(title, cards) {
   const t = h('div', { class: 'toast', onclick: () => t.remove() }, h('b', {}, title),
-    h('div', { class: 'imgs' }, ...cards.map((c) => (c.image ? h('img', { src: c.image, alt: c.name, title: c.name }) : h('span', { class: 'stat' }, c.name)))));
+    h('div', { class: 'imgs' }, ...(cards.length ? cards.map((c) => (c.image ? h('img', { src: c.image, alt: c.name, title: c.name }) : h('span', { class: 'stat' }, c.name))) : [h('span', { class: 'muted' }, '(nada)')])));
   $('#toasts').append(t);
   setTimeout(() => t.remove(), 9000);
+}
+function handRequestToast(ev) {
+  const t = h('div', { class: 'toast' },
+    h('b', {}, `${ev.from} te pide que reveles tu mano`),
+    h('div', { class: 'modal-actions' },
+      h('button', { class: 'btn small ghost', onclick: () => t.remove() }, 'Ignorar'),
+      h('button', { class: 'btn small primary', onclick: () => { act(ev.target, { type: 'revealHand' }); t.remove(); } }, 'Revelar mi mano')));
+  $('#toasts').append(t);
+  setTimeout(() => t.remove(), 20000);
 }
 
 // ---------- Animaciones de mesa ----------
 const ANN_ICON = { respond: '✋', trigger: '⚡', wait: '⏸', ok: '✓' };
 function onStage(el, ms) {
-  const stage = $('#stage');
-  stage.append(el);
+  $('#stage').append(el);
   setTimeout(() => { el.classList.add('leaving'); setTimeout(() => el.remove(), 400); }, ms);
 }
 function chime(freqs) {

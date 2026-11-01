@@ -19,6 +19,7 @@
         <input id="lobby-name" maxlength="24" placeholder="Ej: Alejandro" autocomplete="nickname" />
       </label>
       <button id="btn-create" class="btn primary wide">Crear sala privada</button>
+      <button id="btn-solo" class="btn wide ghost-border">Practicar solo (goldfish)</button>
       <div class="divider"><span>o únete con un código</span></div>
       <div class="join-row">
         <input id="lobby-code" maxlength="6" placeholder="CÓDIGO" autocomplete="off" />
@@ -33,6 +34,8 @@
     <header class="topbar">
       <div class="brand small">EDH<span>Platform</span></div>
       <button id="btn-copy" class="chip code-chip" title="Copiar enlace de invitación">Sala <b id="room-code"></b> <span class="muted">· copiar enlace</span></button>
+      <span id="solo-chip" class="chip solo-chip hidden">Práctica en solitario</span>
+      <button id="btn-seat" class="btn small hidden" title="Agregar un asiento que controlas tú">+ Asiento</button>
       <div class="turn-box">
         <span class="muted">Turno <b id="turn-num">0</b>:</span> <b id="turn-player"></b>
         <button id="btn-pass" class="btn small">Pasar turno</button>
@@ -57,7 +60,7 @@
         <div id="opponents"></div>
         <div id="me"></div>
         <div id="hand-wrap">
-          <div class="hand-label">Mano <span id="hand-count"></span></div>
+          <div class="hand-label">Mano <span id="hand-count"></span> <span id="hand-tabs" class="hand-tabs"></span></div>
           <div id="hand" data-drop="hand"></div>
         </div>
       </main>
@@ -75,6 +78,7 @@
   <div id="modal-deck" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="deck-title">
     <div class="modal-box">
       <h2 id="deck-title">Cargar mazo</h2>
+      <p id="deck-for" class="muted small hidden"></p>
       <p class="muted">Pega tu lista exportada desde Moxfield, Archidekt o MTGO (formato <code>1 Sol Ring</code>). Las imágenes vienen de Scryfall.</p>
       <label class="field"><span>Comandante(s) — uno por línea</span>
         <textarea id="deck-commanders" rows="2" placeholder="1 Tymna the Weaver&#10;1 Kraum, Ludevic's Opus"></textarea>
@@ -117,12 +121,43 @@
         <li>Atajos: <kbd>D</kbd> robar · <kbd>U</kbd> enderezar todo · con el mouse sobre una carta: <kbd>T</kbd> girar, <kbd>F</kbd> boca abajo, <kbd>+</kbd>/<kbd>-</kbd> contadores.</li>
         <li><b>Anuncios</b>: botones ✋ Respondo, ⚡ Trigger, ⏸ Espera y ✓ OK (atajos <kbd>R</kbd> y <kbd>G</kbd>). En el clic derecho de una carta pública, «Anunciar trigger de esta carta» muestra la carta a todos.</li>
         <li><b>Comandos de chat</b>: <code>/moneda</code> · <code>/dado</code> o <code>/d6</code> o <code>/dado 2d6</code> · <code>/respondo</code> · <code>/trigger</code> · <code>/espera</code> · <code>/ok</code> · <code>/robar 2</code> · <code>/enderezar</code> · <code>/barajar</code> · <code>/vida -3</code> · <code>/ayuda</code></li>
+        <li><b>Adjuntar</b>: clic derecho → «Adjuntar a…» y luego clic en el permanente (tuyo o rival). Arrastrar una carta adjunta la suelta.</li>
+        <li><b>Dar control</b> de un permanente a otro jugador desde su menú. Cuando deja el campo vuelve a las zonas de su dueño.</li>
+        <li><b>Zonas rivales</b>: clic derecho en la biblioteca de un rival (moler, exiliar o revelar el tope) o clic en su contador ✋ (descarte al azar, pedir que revele la mano). Todo queda en el log.</li>
+        <li><b>Ficha de carta</b>: clic derecho → «Ver ficha» para texto oráculo, legalidad y rulings.</li>
+        <li><b>Práctica en solitario</b>: desde el inicio. Con «+ Asiento» agregas tableros que controlas tú; las pestañas de la mano cambian de asiento.</li>
         <li>Vida: clic en <b>+</b>/<b>−</b> (con <kbd>Shift</kbd> ±5). Daño de comandante: clic suma, clic derecho resta.</li>
       </ul>
       <div class="modal-actions"><button class="btn primary" data-close>Entendido</button></div>
     </div>
   </div>
 
+  <div id="modal-token" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="token-title">
+    <div class="modal-box wide">
+      <div class="modal-head">
+        <h2 id="token-title">Crear token</h2>
+        <div class="modal-actions inline"><button class="btn small ghost" data-close>Cerrar</button></div>
+      </div>
+      <div class="token-search">
+        <input id="token-query" placeholder="Busca en Scryfall: Treasure, Zombie, Soldier, Clue…" autocomplete="off" />
+        <button id="btn-token-plain" class="btn">Crear sin imagen</button>
+      </div>
+      <p id="token-status" class="muted small"></p>
+      <div id="token-results" class="zone-grid"></div>
+    </div>
+  </div>
+
+  <div id="modal-info" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="info-title">
+    <div class="modal-box wide">
+      <div class="modal-head">
+        <h2 id="info-title">Ficha de la carta</h2>
+        <div class="modal-actions inline"><button class="btn small ghost" data-close>Cerrar</button></div>
+      </div>
+      <div id="info-body" class="info-body"></div>
+    </div>
+  </div>
+
+  <div id="target-banner" class="target-banner hidden"></div>
   <div id="menu" class="menu hidden" role="menu"></div>
   <div id="toasts" class="toasts"></div>
   <div id="stage" class="stage" aria-live="polite"></div>

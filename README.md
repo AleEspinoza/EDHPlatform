@@ -1,6 +1,6 @@
 # EDH Platform
 
-Versión 0.2
+Versión 0.3
 
 Mesa virtual de Commander/EDH con salas privadas, mazos importados y todas las acciones del juego en tiempo real.
 
@@ -11,6 +11,12 @@ Mesa virtual de Commander/EDH con salas privadas, mazos importados y todas las a
 - **Importar mazo** pegando la lista (Moxfield, Archidekt, MTGO: `1 Sol Ring (C21) 263`). Imágenes desde Scryfall, cartas de dos caras con transformar.
 - **Zonas**: biblioteca, mano, campo de batalla, cementerio, exilio y zona de mando.
 - **Acciones**: robar, moler, barajar, mulligan, girar/enderezar, enderezar todo, boca abajo, transformar, contadores, tokens y copias, mover al tope o fondo de la biblioteca, mirar el tope X, buscar en la biblioteca, revelar carta o mano.
+- **Adjuntar** auras y equipos a cualquier permanente (tuyo o rival); el adjunto se dibuja bajo su anfitrión y se suelta si este deja el campo.
+- **Cambio de control**: entrega un permanente a otro jugador; al dejar el campo vuelve a las zonas de su dueño, y queda marcado con su color.
+- **Tokens**: buscador de tokens de Scryfall con imagen, tokens que crea cada carta (desde su menú) y tokens de texto libre.
+- **Ficha de carta**: texto oráculo, legalidad en Commander y rulings desde Scryfall, también para cartas de rivales.
+- **Zonas rivales**: moler, exiliar o revelar el tope de su biblioteca, descarte al azar y pedirle que revele la mano (todo queda en el log).
+- **Práctica en solitario (goldfish)**: sala privada solo tuya, con «+ Asiento» para agregar tableros que controlas (con tu mazo u otro) y pestañas para manejar la mano de cada asiento.
 - **Marcadores**: vida (40), veneno y daño de comandante por rival (descuenta vida y marca letal a 21).
 - **Mesa compartida**: turnos, log de la partida y chat.
 - **Anuncios animados** para toda la mesa: ✋ Respondo, ⚡ Tengo un trigger (opcionalmente mostrando la carta), ⏸ Espera y ✓ OK, con sonido.

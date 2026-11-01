@@ -227,3 +227,32 @@ textarea { resize: vertical; font-size: 13px; }
 @keyframes die-land { from { transform: scale(1.5); } }
 .log p.log-announce { color: #f3d27f; font-weight: 600; }
 @media (prefers-reduced-motion: reduce) { .announce, .roll-card, .coin, .die, .announce-icon { animation-duration: .01s !important; animation-iteration-count: 1 !important; } }
+
+/* v0.3: solitario, adjuntos, apuntar, tokens, ficha */
+.btn.ghost-border { background: transparent; margin-top: 10px; }
+.solo-chip { color: var(--gold); cursor: default; }
+.hand-tabs { display: inline-flex; gap: 4px; margin-left: 8px; text-transform: none; letter-spacing: 0; }
+.hand-tabs button { font: 600 11px var(--font); color: var(--text); background: rgba(255,255,255,.06); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; cursor: pointer; }
+.hand-tabs button.on { background: var(--pc, var(--gold)); color: #111; border-color: transparent; }
+.battlefield .card.attached { margin-top: calc(var(--att) * -16px); margin-left: calc(var(--att) * 9px); }
+.battlefield .card.host { z-index: 2; }
+.card .tag.ctl { left: auto; right: 3px; background: var(--ctl, #333); color: #111; }
+.seat-x { margin-left: 4px; background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 14px; }
+.seat-x:hover { color: #ff8a80; }
+.counts.click { cursor: pointer; text-decoration: underline dotted; }
+body.targeting, body.targeting * { cursor: crosshair !important; }
+body.targeting .battlefield .card:hover { outline: 3px solid var(--gold); outline-offset: 1px; }
+.target-banner { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 1600; background: var(--gold); color: #1c1608; font-weight: 700; padding: 8px 16px; border-radius: 999px; box-shadow: 0 10px 30px rgba(0,0,0,.5); }
+.token-search { display: flex; gap: 8px; margin-top: 6px; }
+.info-body { display: grid; grid-template-columns: minmax(200px, 300px) 1fr; gap: 20px; margin-top: 10px; user-select: text; }
+.info-body img { width: 100%; border-radius: 12px; display: block; margin-bottom: 8px; }
+.info-body h3 { margin: 0 0 4px; font-size: 18px; }
+.info-body .type { color: var(--muted); margin: 0 0 10px; }
+.info-body .oracle { white-space: pre-line; line-height: 1.5; background: rgba(255,255,255,.04); border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; }
+.info-body .legal { display: inline-block; font-size: 12px; font-weight: 700; border-radius: 6px; padding: 2px 8px; margin-bottom: 12px; }
+.legal.ok { background: #1f4a35; color: #8fe3b8; }
+.legal.no { background: #4a1f1f; color: #ff9b91; }
+.rulings { font-size: 13px; padding-left: 16px; }
+.rulings li { margin-bottom: 6px; }
+.rulings time { color: var(--muted); font-size: 11px; margin-right: 6px; }
+@media (max-width: 700px) { .info-body { grid-template-columns: 1fr; } }

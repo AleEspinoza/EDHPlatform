@@ -34,7 +34,10 @@ function toCardData(card) {
   const faces = card.card_faces ?? [];
   const image = card.image_uris?.normal ?? faces[0]?.image_uris?.normal ?? null;
   const backImage = !card.image_uris && faces[1]?.image_uris?.normal ? faces[1].image_uris.normal : null;
-  return { name: card.name, image, backImage, typeLine: card.type_line ?? '' };
+  const tokens = (card.all_parts ?? [])
+    .filter((part) => part.component === 'token' && part.id !== card.id)
+    .map((part) => ({ name: part.name, id: part.id }));
+  return { name: card.name, image, backImage, typeLine: card.type_line ?? '', scryfallId: card.id ?? null, tokens };
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -93,4 +96,27 @@ export async function resolveDeck(parsed, onProgress = () => {}) {
     return Array.from({ length: e.qty }, () => data);
   });
   return { commanders: expand(parsed.commanders), cards: expand(parsed.cards), notFound: [...new Set(notFound)] };
+}
+
+// ---------- Consultas sueltas a Scryfall (ficha de carta y tokens) ----------
+const cache = new Map();
+async function getJson(url) {
+  if (cache.has(url)) return cache.get(url);
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Scryfall respondió ${res.status}`);
+  const json = await res.json();
+  cache.set(url, json);
+  return json;
+}
+
+export const fetchCard = (id) => getJson(`https://api.scryfall.com/cards/${encodeURIComponent(id)}`);
+export const fetchRulings = (id) => getJson(`https://api.scryfall.com/cards/${encodeURIComponent(id)}/rulings`).then((r) => r?.data ?? []);
+export { toCardData };
+
+/** Busca tokens por nombre; devuelve como máximo `limit` resultados con imagen. */
+export async function searchTokens(query, limit = 24) {
+  const q = `t:token ${query}`.trim();
+  const json = await getJson(`https://api.scryfall.com/cards/search?unique=art&order=name&q=${encodeURIComponent(q)}`);
+  return (json?.data ?? []).slice(0, limit).map(toCardData).filter((c) => c.image);
 }

@@ -1,6 +1,6 @@
 # EDH Platform
 
-Versión 0.3
+Versión 0.4
 
 Mesa virtual de Commander/EDH con salas privadas, mazos importados y todas las acciones del juego en tiempo real.
 
@@ -8,6 +8,8 @@ Mesa virtual de Commander/EDH con salas privadas, mazos importados y todas las a
 
 - **Salas privadas** con código de 6 caracteres y enlace de invitación (`/?sala=CODIGO`), hasta 6 jugadores.
 - **Reconexión**: si recargas o se cae la conexión, vuelves a tu asiento con tus cartas.
+- **Cuentas**: usuario y contraseña (opcional) para guardar mazos; jugar un mazo guardado es un clic, sin volver a consultar Scryfall. Editar un mazo lo actualiza en vez de duplicarlo.
+- **Importar desde Moxfield por link** (apagado por defecto; ver abajo).
 - **Importar mazo** pegando la lista (Moxfield, Archidekt, MTGO: `1 Sol Ring (C21) 263`). Imágenes desde Scryfall, cartas de dos caras con transformar.
 - **Zonas**: biblioteca, mano, campo de batalla, cementerio, exilio y zona de mando.
 - **Acciones**: robar, moler, barajar, mulligan, girar/enderezar, enderezar todo, boca abajo, transformar, contadores, tokens y copias, mover al tope o fondo de la biblioteca, mirar el tope X, buscar en la biblioteca, revelar carta o mano.
@@ -25,7 +27,7 @@ Mesa virtual de Commander/EDH con salas privadas, mazos importados y todas las a
 
 ## Cómo correrlo
 
-Requiere Node.js 18 o superior.
+Requiere Node.js 22.13 o superior (usa el SQLite integrado de Node; la base queda en `data/edhplatform.db`).
 
 ```bash
 npm install
@@ -34,6 +36,20 @@ npm test           # motor de juego + partida por sockets
 ```
 
 Para jugar con amigos fuera de tu red, despliega en cualquier hosting de Node con WebSockets (Render, Railway, Fly.io) o expón tu puerto local con un túnel (`cloudflared tunnel --url http://localhost:3000`).
+
+### Variables de entorno
+
+| Variable | Para qué |
+|---|---|
+| `PORT` | Puerto HTTP (3000 por defecto) |
+| `DB_FILE` | Ruta de la base SQLite (por defecto `data/edhplatform.db`) |
+| `NODE_ENV=production` | Cookies de sesión con `Secure` (requiere HTTPS) |
+| `TRUST_PROXY=1` | Detrás de un proxy (Render, Railway, Fly) |
+| `MOXFIELD_USER_AGENT` | Activa la importación por link de Moxfield |
+
+### Sobre Moxfield
+
+Moxfield no tiene API pública ni login para apps externas, y sus términos prohíben el scraping sin autorización. Para activar la importación por link hay que escribir a **support@moxfield.com**, describir la app y pedir un User-Agent autorizado; ese valor va en `MOXFIELD_USER_AGENT`. Sin él, el botón queda desactivado y la app indica cómo exportar el texto desde Moxfield.
 
 ## Controles
 
@@ -47,6 +63,10 @@ Para jugar con amigos fuera de tu red, despliega en cualquier hosting de Node co
 ```
 server/game.js   Motor puro: estado autoritativo, acciones validadas y vista filtrada por jugador
 server/index.js  Express + Socket.IO: salas, códigos, reconexión por token, difusión de estado
+server/api.js    REST: cuentas, mazos guardados e importación
+server/auth.js   scrypt, sesiones por cookie httpOnly, límite de intentos
+server/db.js     Esquema SQLite (usuarios, sesiones, mazos)
+server/moxfield.js  Importador de Moxfield (requiere autorización)
 public/          Cliente sin build step (ES modules): lobby, tablero, menús, importación de mazos
 test/            node:test — motor y partida multijugador por sockets
 ```
@@ -55,7 +75,8 @@ El servidor es la única fuente de verdad. El cliente solo envía intenciones (`
 
 ## Próximos pasos sugeridos
 
-- Persistencia (Redis/Postgres) para que las salas sobrevivan a un reinicio.
-- Importar por URL de Moxfield/Archidekt (requiere un proxy en el servidor).
+- Persistir también las partidas en curso para que sobrevivan a un reinicio.
+- Recuperación de contraseña (requiere correo) o login con Discord/Google.
+- Importar por link de Archidekt (tiene API pública).
 - Selección múltiple y arrastre en grupo, flechas de objetivo y fases del turno.
 - Cuentas, mazos guardados y matchmaking por nivel de poder (bracket).

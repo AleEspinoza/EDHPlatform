@@ -14,6 +14,25 @@
     <div class="lobby-card">
       <h1 class="brand">EDH<span>Platform</span></h1>
       <p class="tagline">Mesa virtual de Commander con salas privadas</p>
+      <div id="account-box" class="account-box">
+        <div id="account-in" class="account-in hidden">
+          <span>Conectado como <b id="acc-name"></b></span>
+          <button id="btn-logout" class="btn small ghost">Cerrar sesión</button>
+        </div>
+        <div id="account-out">
+          <button id="btn-acc-toggle" class="link-btn">Inicia sesión o crea una cuenta para guardar tus mazos</button>
+          <form id="acc-form" class="acc-form hidden">
+            <div class="seg">
+              <button type="button" data-mode="login" class="on">Iniciar sesión</button>
+              <button type="button" data-mode="register">Crear cuenta</button>
+            </div>
+            <input id="acc-user" maxlength="20" placeholder="Usuario" autocomplete="username" />
+            <input id="acc-pass" type="password" maxlength="200" placeholder="Contraseña (mín. 8)" autocomplete="current-password" />
+            <button id="btn-acc" class="btn wide">Entrar</button>
+            <p id="acc-error" class="error small" role="alert"></p>
+          </form>
+        </div>
+      </div>
       <label class="field">
         <span>Tu nombre</span>
         <input id="lobby-name" maxlength="24" placeholder="Ej: Alejandro" autocomplete="nickname" />
@@ -79,7 +98,16 @@
     <div class="modal-box">
       <h2 id="deck-title">Cargar mazo</h2>
       <p id="deck-for" class="muted small hidden"></p>
-      <p class="muted">Pega tu lista exportada desde Moxfield, Archidekt o MTGO (formato <code>1 Sol Ring</code>). Las imágenes vienen de Scryfall.</p>
+      <div id="saved-decks" class="saved-decks">
+        <div class="saved-head"><b>Mis mazos</b> <span id="saved-hint" class="muted small"></span></div>
+        <div id="saved-list" class="saved-list"></div>
+      </div>
+      <div class="mox-row">
+        <input id="mox-url" placeholder="Link de Moxfield: https://moxfield.com/decks/…" autocomplete="off" />
+        <button id="btn-mox" class="btn">Importar</button>
+      </div>
+      <p id="mox-note" class="muted small"></p>
+      <p class="muted">O pega tu lista exportada desde Moxfield, Archidekt o MTGO (formato <code>1 Sol Ring</code>). Las imágenes vienen de Scryfall.</p>
       <label class="field"><span>Comandante(s) — uno por línea</span>
         <textarea id="deck-commanders" rows="2" placeholder="1 Tymna the Weaver&#10;1 Kraum, Ludevic's Opus"></textarea>
       </label>
@@ -87,6 +115,10 @@
         <textarea id="deck-list" rows="12" placeholder="1 Sol Ring&#10;1 Mana Crypt&#10;1 Rhystic Study&#10;…"></textarea>
       </label>
       <p class="muted small">Si tu lista tiene una sección <code>Commander</code>, también se detecta sola.</p>
+      <div id="deck-save-row" class="deck-save-row">
+        <label class="check"><input type="checkbox" id="deck-save" /> Guardar en mi cuenta como</label>
+        <input id="deck-name" maxlength="80" placeholder="Nombre del mazo" />
+      </div>
       <p id="deck-status" class="status"></p>
       <div class="modal-actions">
         <button class="btn ghost" data-close>Cancelar</button>

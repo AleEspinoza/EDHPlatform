@@ -35,6 +35,9 @@ let handSeat = null; // asiento cuya mano se muestra (modo solitario)
 let targeting = null; // { iid, pid, name } mientras se elige a qué adjuntar
 let deckFor = null; // asiento al que se le carga el mazo
 let tokenFor = null; // { pid, x, y } para el modal de tokens
+let account = null; // { id, username } si hay sesión
+let editingDeck = null; // id del mazo guardado que se está editando
+let moxEnabled = null; // importador de Moxfield disponible en el servidor
 
 const ZONE_NAMES = { library: 'Biblioteca', hand: 'Mano', battlefield: 'Campo', graveyard: 'Cementerio', exile: 'Exilio', command: 'Zona de mando' };
 
@@ -95,6 +98,69 @@ socket.on('event', (ev) => {
   if (ev.kind === 'revealHand') return toastCards(ev.player.startsWith('Tope') ? ev.player : `${ev.player} revela su mano`, ev.cards);
   if (ev.kind === 'handRequest' && isMine(ev.target)) return handRequestToast(ev);
 });
+
+// ---------- API REST ----------
+async function api(method, path, body) {
+  const res = await fetch(`/api${path}`, {
+    method,
+    headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    credentials: 'same-origin',
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(json.error ?? `Error ${res.status}`), { status: res.status });
+  return json;
+}
+
+// ---------- Cuenta ----------
+let accMode = 'login';
+function renderAccount() {
+  $('#account-in').classList.toggle('hidden', !account);
+  $('#account-out').classList.toggle('hidden', Boolean(account));
+  $('#acc-name').textContent = account?.username ?? '';
+  if (account && !$('#lobby-name').value.trim()) $('#lobby-name').value = account.username;
+}
+async function refreshAccount() {
+  try { account = (await api('GET', '/auth/me')).user; } catch { account = null; }
+  renderAccount();
+}
+$('#btn-acc-toggle').addEventListener('click', () => {
+  $('#acc-form').classList.toggle('hidden');
+  if (!$('#acc-form').classList.contains('hidden')) $('#acc-user').focus();
+});
+document.querySelectorAll('#acc-form [data-mode]').forEach((b) => b.addEventListener('click', () => {
+  accMode = b.dataset.mode;
+  document.querySelectorAll('#acc-form [data-mode]').forEach((x) => x.classList.toggle('on', x === b));
+  $('#btn-acc').textContent = accMode === 'login' ? 'Entrar' : 'Crear cuenta';
+  $('#acc-pass').autocomplete = accMode === 'login' ? 'current-password' : 'new-password';
+  $('#acc-error').textContent = '';
+}));
+$('#acc-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('#btn-acc');
+  btn.disabled = true;
+  $('#acc-error').textContent = '';
+  try {
+    const { user } = await api('POST', accMode === 'login' ? '/auth/login' : '/auth/register', { username: $('#acc-user').value.trim(), password: $('#acc-pass').value });
+    account = user;
+    $('#acc-pass').value = '';
+    $('#acc-form').classList.add('hidden');
+    renderAccount();
+    socket.disconnect().connect(); // el socket toma la nueva cookie de sesión
+    toast(accMode === 'login' ? `Hola, ${user.username}` : `Cuenta creada. ¡Bienvenido, ${user.username}!`);
+  } catch (err) {
+    $('#acc-error').textContent = err.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+$('#btn-logout').addEventListener('click', async () => {
+  await api('POST', '/auth/logout', {}).catch(() => {});
+  account = null;
+  renderAccount();
+  socket.disconnect().connect();
+});
+refreshAccount();
 
 // ---------- Lobby ----------
 $('#lobby-name').value = store.get('edh.name', '');
@@ -662,8 +728,108 @@ function openDeckModal(pid = state?.you) {
   $('#deck-list').value = forSeat ? '' : saved.list ?? '';
   $('#deck-status').textContent = '';
   $('#deck-status').className = 'status';
+  editingDeck = null;
+  $('#deck-name').value = '';
+  $('#deck-save').checked = Boolean(account) && !forSeat;
+  $('#deck-save').disabled = !account;
+  $('#deck-name').disabled = !account;
+  $('#deck-save-row').classList.toggle('disabled', !account);
+  $('#deck-save-row').title = account ? '' : 'Inicia sesión desde la pantalla de inicio para guardar mazos';
+  $('#mox-url').value = '';
   openModal('#modal-deck');
+  renderSavedDecks();
+  renderMoxfield();
 }
+
+async function renderSavedDecks() {
+  const list = $('#saved-list');
+  $('#saved-hint').textContent = '';
+  if (!account) {
+    list.replaceChildren(h('div', { class: 'saved-empty' }, 'Crea una cuenta en la pantalla de inicio para guardar tus mazos y cargarlos con un clic.'));
+    return;
+  }
+  list.replaceChildren(h('div', { class: 'saved-empty' }, 'Cargando…'));
+  try {
+    const { decks } = await api('GET', '/decks');
+    $('#saved-hint').textContent = decks.length ? `${decks.length} guardado${decks.length === 1 ? '' : 's'}` : '';
+    if (!decks.length) return list.replaceChildren(h('div', { class: 'saved-empty' }, 'Aún no tienes mazos guardados. Carga uno abajo con «Guardar en mi cuenta» marcado.'));
+    list.replaceChildren(...decks.map((d) => h('div', { class: `saved-item${editingDeck === d.id ? ' editing' : ''}` },
+      h('div', { class: 'meta' }, h('b', {}, d.name), h('span', {}, `${d.commanders || 'Sin comandante'} · ${d.cardCount} cartas`)),
+      h('button', { class: 'btn small primary', onclick: () => playSavedDeck(d) }, 'Jugar'),
+      h('button', { class: 'btn small ghost', onclick: () => editSavedDeck(d) }, 'Editar'),
+      h('button', { class: 'btn small ghost danger', title: 'Borrar', onclick: () => deleteSavedDeck(d) }, '🗑'))));
+  } catch (err) {
+    list.replaceChildren(h('div', { class: 'saved-empty' }, `No se pudieron cargar tus mazos: ${err.message}`));
+  }
+}
+async function playSavedDeck(d) {
+  try {
+    const { deck } = await api('GET', `/decks/${d.id}`);
+    const res = await act(deckFor, { type: 'setDeck', commanders: deck.resolved.commanders, cards: deck.resolved.cards });
+    if (res?.ok) {
+      closeModal('#modal-deck');
+      toast(`Mazo «${deck.name}» listo. ¡Roba 7!`);
+    }
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+async function editSavedDeck(d) {
+  try {
+    const { deck } = await api('GET', `/decks/${d.id}`);
+    editingDeck = deck.id;
+    $('#deck-commanders').value = deck.commandersText;
+    $('#deck-list').value = deck.listText;
+    $('#deck-name').value = deck.name;
+    $('#deck-save').checked = true;
+    $('#deck-status').className = 'status';
+    $('#deck-status').textContent = `Editando «${deck.name}». Al cargar se actualiza en tu cuenta.`;
+    renderSavedDecks();
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+async function deleteSavedDeck(d) {
+  if (!confirm(`¿Borrar «${d.name}» de tu cuenta?`)) return;
+  try {
+    await api('DELETE', `/decks/${d.id}`);
+    if (editingDeck === d.id) editingDeck = null;
+    renderSavedDecks();
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+async function renderMoxfield() {
+  if (moxEnabled === null) {
+    try { moxEnabled = (await api('GET', '/import/moxfield/status')).enabled; } catch { moxEnabled = false; }
+  }
+  $('#mox-url').disabled = !moxEnabled;
+  $('#btn-mox').disabled = !moxEnabled;
+  $('#mox-note').textContent = moxEnabled
+    ? 'Solo mazos públicos.'
+    : 'Importar por link se activa cuando Moxfield autorice la app. Mientras tanto: en Moxfield, abre el mazo → «More» → «Export» → copia el texto y pégalo abajo.';
+}
+$('#btn-mox').addEventListener('click', async () => {
+  const url = $('#mox-url').value.trim();
+  if (!url) return;
+  const btn = $('#btn-mox');
+  btn.disabled = true;
+  $('#deck-status').className = 'status';
+  $('#deck-status').textContent = 'Trayendo el mazo desde Moxfield…';
+  try {
+    const { deck } = await api('GET', `/import/moxfield?url=${encodeURIComponent(url)}`);
+    $('#deck-commanders').value = deck.commandersText;
+    $('#deck-list').value = deck.listText;
+    if (!$('#deck-name').value.trim()) $('#deck-name').value = deck.name;
+    $('#deck-status').textContent = `«${deck.name}» importado. Revisa la lista y pulsa «Cargar y barajar».`;
+  } catch (err) {
+    $('#deck-status').className = 'status err';
+    $('#deck-status').textContent = err.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
 $('#btn-deck').addEventListener('click', () => openDeckModal(state.you));
 $('#btn-deck-load').addEventListener('click', async () => {
   const status = $('#deck-status');
@@ -682,6 +848,17 @@ $('#btn-deck-load').addEventListener('click', async () => {
   try {
     const deck = await resolveDeck(parsed, (done, all) => { status.textContent = `Buscando cartas en Scryfall… ${done}/${all}`; });
     const res = await act(deckFor, { type: 'setDeck', commanders: deck.commanders, cards: deck.cards });
+    if (res?.ok && account && $('#deck-save').checked) {
+      const name = $('#deck-name').value.trim() || deck.commanders.map((c) => c.name).join(' + ') || 'Mi mazo';
+      const body = { name, commandersText: cmdText, listText: listText, resolved: { commanders: deck.commanders, cards: deck.cards } };
+      try {
+        const saved = editingDeck ? await api('PUT', `/decks/${editingDeck}`, body) : await api('POST', '/decks', body);
+        editingDeck = saved.deck.id;
+        toast(`Guardado en tu cuenta como «${saved.deck.name}»`);
+      } catch (err) {
+        toast(`No se pudo guardar: ${err.message}`, true);
+      }
+    }
     if (res?.ok) {
       const count = deck.commanders.length + deck.cards.length;
       if (deck.notFound.length) {

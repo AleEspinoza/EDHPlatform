@@ -256,3 +256,29 @@ body.targeting .battlefield .card:hover { outline: 3px solid var(--gold); outlin
 .rulings li { margin-bottom: 6px; }
 .rulings time { color: var(--muted); font-size: 11px; margin-right: 6px; }
 @media (max-width: 700px) { .info-body { grid-template-columns: 1fr; } }
+
+/* v0.4: cuentas y mazos guardados */
+.account-box { margin: -8px 0 20px; }
+.link-btn { background: none; border: 0; padding: 0; color: var(--gold); font: 500 13px var(--font); cursor: pointer; text-align: left; }
+.link-btn:hover { text-decoration: underline; }
+.account-in { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: rgba(255,255,255,.05); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.acc-form { display: grid; gap: 8px; margin-top: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(0,0,0,.2); }
+.seg { display: grid; grid-template-columns: 1fr 1fr; background: rgba(0,0,0,.3); border-radius: 8px; padding: 3px; }
+.seg button { background: none; border: 0; color: var(--muted); font: 600 12px var(--font); padding: 6px; border-radius: 6px; cursor: pointer; }
+.seg button.on { background: rgba(255,255,255,.1); color: var(--text); }
+.saved-decks { margin: 8px 0 12px; }
+.saved-head { margin-bottom: 6px; }
+.saved-list { display: grid; gap: 6px; max-height: 220px; overflow-y: auto; }
+.saved-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.03); }
+.saved-item.editing { border-color: var(--gold); }
+.saved-item .meta { flex: 1; min-width: 0; }
+.saved-item .meta b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saved-item .meta span { font-size: 12px; color: var(--muted); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saved-empty { font-size: 13px; color: var(--muted); padding: 8px 0; }
+.mox-row { display: flex; gap: 8px; }
+.mox-row input:disabled, .mox-row button:disabled { opacity: .5; }
+.deck-save-row { display: flex; align-items: center; gap: 10px; margin: 6px 0 4px; }
+.deck-save-row input[type=text], .deck-save-row #deck-name { flex: 1; }
+.check { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 13px; }
+.check input { width: auto; }
+.deck-save-row.disabled { opacity: .45; }

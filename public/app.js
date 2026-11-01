@@ -115,7 +115,9 @@ socket.on('connect', async () => {
     $('#lobby-code').value = urlCode;
   }
 });
-socket.on('disconnect', () => toast('Conexión perdida, reintentando…', true));
+let quietReconnect = false; // reconexión intencional (al entrar o salir de la cuenta)
+const reconnectQuietly = () => { quietReconnect = true; socket.disconnect().connect(); };
+socket.on('disconnect', () => { if (!quietReconnect) toast('Conexión perdida, reintentando…', true); quietReconnect = false; });
 socket.on('state', (s) => {
   const first = !state;
   state = s;
@@ -167,7 +169,7 @@ async function refreshAccount() {
     showScreen('lobby');
     loadHome();
   }
-  if (socket.connected) socket.disconnect().connect(); // el socket toma la cookie de sesión
+  if (socket.connected) reconnectQuietly(); // el socket toma la cookie de sesión
 }
 async function initLogin() {
   const params = new URLSearchParams(location.search);
@@ -213,7 +215,7 @@ $('#btn-logout').addEventListener('click', async () => {
   session = null;
   renderAccount();
   showScreen('login');
-  socket.disconnect().connect();
+  reconnectQuietly();
 });
 initLogin();
 refreshAccount();

@@ -696,3 +696,93 @@ html.has-zones-frame .pile { background: rgba(10,6,3,.5); }
 @keyframes bokeh-rise-big { from { transform: scale(1.8) translateY(0); } to { transform: scale(1.8) translateY(-18%); } }
 .mat-option.anim .lava u { animation-duration: 20s; }
 @media (prefers-reduced-motion: reduce) { .lava u { animation: none !important; } }
+
+/* ---------- Landing «Placa rúnica» (estilo del logo) ----------
+   Piedra oscura con humo, anillo de runas que gira muy lento detrás de la placa y brasas
+   que suben. Visible en la entrada y en el inicio; la sala conserva la taberna. */
+:root { --iron: #17120e; --iron-2: #241c15; --bronze: #b0814a; --bronze-hi: #f2c987; --bronze-lo: #5c4021; --ember-c: #ff8a3c; --display-2: 'Cinzel', 'Bree Serif', serif; }
+.rune-backdrop { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; display: none;
+  background:
+    radial-gradient(40% 35% at 30% 25%, rgba(120,110,100,.16), transparent 70%),
+    radial-gradient(45% 40% at 75% 70%, rgba(110,100,95,.14), transparent 70%),
+    radial-gradient(70% 60% at 50% 45%, #1d1712 0%, #0d0a08 70%, #050403 100%); }
+body:has(#login:not(.hidden)) .rune-backdrop, body:has(#lobby:not(.hidden)) .rune-backdrop { display: block; }
+#login, #lobby { background: none !important; }
+.rune-ring { position: absolute; left: 50%; top: 42%; width: min(150vh, 130vw); aspect-ratio: 1; transform: translate(-50%, -50%); animation: ring-spin 240s linear infinite; opacity: .55; }
+.ring-line { fill: none; stroke: rgba(90,80,70,.55); stroke-width: 3; }
+.ring-line.thin { stroke-width: 1.5; stroke: rgba(90,80,70,.35); }
+.ring-text { font: 44px 'Noto Sans Runic', serif; fill: rgba(196,150,90,.42); letter-spacing: 6px; }
+.ring-text.inner { font-size: 34px; fill: rgba(196,150,90,.28); }
+@keyframes ring-spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+#lobby .rune-ring { top: 50%; opacity: .3; }
+.embers i { position: absolute; bottom: -10px; width: 3px; height: 3px; border-radius: 50%; background: var(--ember-c); box-shadow: 0 0 6px 2px rgba(255,138,60,.7); opacity: 0; animation: ember-rise linear infinite; }
+.embers i:nth-child(1) { left: 0%; animation-duration: 9s; animation-delay: 0s; --drift: -30px; transform: scale(0.6); }
+.embers i:nth-child(2) { left: 37%; animation-duration: 16s; animation-delay: 4s; --drift: -1px; transform: scale(1.3); }
+.embers i:nth-child(3) { left: 74%; animation-duration: 12s; animation-delay: 8s; --drift: 28px; transform: scale(1.0); }
+.embers i:nth-child(4) { left: 11%; animation-duration: 19s; animation-delay: 12s; --drift: -3px; transform: scale(0.7); }
+.embers i:nth-child(5) { left: 48%; animation-duration: 15s; animation-delay: 16s; --drift: 26px; transform: scale(1.4); }
+.embers i:nth-child(6) { left: 85%; animation-duration: 11s; animation-delay: 3s; --drift: -5px; transform: scale(1.1); }
+.embers i:nth-child(7) { left: 22%; animation-duration: 18s; animation-delay: 7s; --drift: 24px; transform: scale(0.8); }
+.embers i:nth-child(8) { left: 59%; animation-duration: 14s; animation-delay: 11s; --drift: -7px; transform: scale(1.5); }
+.embers i:nth-child(9) { left: 96%; animation-duration: 10s; animation-delay: 15s; --drift: 22px; transform: scale(1.2); }
+.embers i:nth-child(10) { left: 33%; animation-duration: 17s; animation-delay: 2s; --drift: -9px; transform: scale(0.9); }
+.embers i:nth-child(11) { left: 70%; animation-duration: 13s; animation-delay: 6s; --drift: 20px; transform: scale(0.6); }
+.embers i:nth-child(12) { left: 7%; animation-duration: 9s; animation-delay: 10s; --drift: -11px; transform: scale(1.3); }
+.embers i:nth-child(13) { left: 44%; animation-duration: 16s; animation-delay: 14s; --drift: 18px; transform: scale(1.0); }
+.embers i:nth-child(14) { left: 81%; animation-duration: 12s; animation-delay: 1s; --drift: -13px; transform: scale(0.7); }
+.embers i:nth-child(15) { left: 18%; animation-duration: 19s; animation-delay: 5s; --drift: 16px; transform: scale(1.4); }
+.embers i:nth-child(16) { left: 55%; animation-duration: 15s; animation-delay: 9s; --drift: -15px; transform: scale(1.1); }
+.embers i:nth-child(17) { left: 92%; animation-duration: 11s; animation-delay: 13s; --drift: 14px; transform: scale(0.8); }
+.embers i:nth-child(18) { left: 29%; animation-duration: 18s; animation-delay: 0s; --drift: -17px; transform: scale(1.5); }
+.embers i:nth-child(19) { left: 66%; animation-duration: 14s; animation-delay: 4s; --drift: 12px; transform: scale(1.2); }
+.embers i:nth-child(20) { left: 3%; animation-duration: 10s; animation-delay: 8s; --drift: -19px; transform: scale(0.9); }
+.embers i:nth-child(21) { left: 40%; animation-duration: 17s; animation-delay: 12s; --drift: 10px; transform: scale(0.6); }
+.embers i:nth-child(22) { left: 77%; animation-duration: 13s; animation-delay: 16s; --drift: -21px; transform: scale(1.3); }
+.embers i:nth-child(23) { left: 14%; animation-duration: 9s; animation-delay: 3s; --drift: 8px; transform: scale(1.0); }
+.embers i:nth-child(24) { left: 51%; animation-duration: 16s; animation-delay: 7s; --drift: -23px; transform: scale(0.7); }
+.embers i:nth-child(25) { left: 88%; animation-duration: 12s; animation-delay: 11s; --drift: 6px; transform: scale(1.4); }
+.embers i:nth-child(26) { left: 25%; animation-duration: 19s; animation-delay: 15s; --drift: -25px; transform: scale(1.1); }
+.embers i:nth-child(27) { left: 62%; animation-duration: 15s; animation-delay: 2s; --drift: 4px; transform: scale(0.8); }
+.embers i:nth-child(28) { left: 99%; animation-duration: 11s; animation-delay: 6s; --drift: -27px; transform: scale(1.5); }
+@keyframes ember-rise { 0% { opacity: 0; translate: 0 0; } 10% { opacity: .9; } 80% { opacity: .6; } 100% { opacity: 0; translate: var(--drift) -105vh; } }
+
+/* Panel de hierro y bronce con remaches */
+#login .lobby-card, .home-play, .home-account {
+  background:
+    radial-gradient(circle at 14px 14px, var(--bronze-hi) 0 2px, var(--bronze-lo) 3px, transparent 4px),
+    radial-gradient(circle at calc(100% - 14px) 14px, var(--bronze-hi) 0 2px, var(--bronze-lo) 3px, transparent 4px),
+    radial-gradient(circle at 14px calc(100% - 14px), var(--bronze-hi) 0 2px, var(--bronze-lo) 3px, transparent 4px),
+    radial-gradient(circle at calc(100% - 14px) calc(100% - 14px), var(--bronze-hi) 0 2px, var(--bronze-lo) 3px, transparent 4px),
+    linear-gradient(180deg, rgba(42,33,25,.94), rgba(18,14,11,.96));
+  border: 2px solid var(--bronze);
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.6), inset 0 0 0 5px rgba(176,129,74,.14), inset 0 1px 0 rgba(242,201,135,.25), 0 30px 70px rgba(0,0,0,.75);
+  backdrop-filter: blur(2px);
+}
+#login .lobby-card { padding: 26px 32px 24px; margin-top: 150px; overflow: visible; }
+.logo-hero { position: absolute; left: 50%; top: -205px; width: min(560px, 118%, calc(100vw - 24px)); transform: translateX(-50%); margin: 0; filter: drop-shadow(0 18px 30px rgba(0,0,0,.8)); animation: logo-in 1.1s cubic-bezier(.2,.9,.3,1) both; }
+.logo-hero img { display: block; width: 100%; }
+.logo-hero::after { content: ''; position: absolute; inset: 8% 8%; background: radial-gradient(closest-side, rgba(255,170,90,.18), transparent); z-index: -1; animation: logo-glow 5s ease-in-out infinite alternate; }
+@keyframes logo-in { from { opacity: 0; transform: translateX(-50%) translateY(-18px) scale(.94); } to { opacity: 1; transform: translateX(-50%); } }
+@keyframes logo-glow { from { opacity: .5; } to { opacity: 1; } }
+#login .tagline { margin: 0 0 20px; font: 600 15px var(--display-2); letter-spacing: .06em; color: var(--bronze-hi); text-shadow: 0 1px 0 #000; }
+#login .divider::before, #login .divider::after, .home .divider::before, .home .divider::after { background: linear-gradient(90deg, transparent, var(--bronze), transparent); }
+#login .seg, .home .tabs { border-color: rgba(176,129,74,.35); }
+#login .seg button.on { background: linear-gradient(180deg, #5a432b, #33261a); }
+#login input, #lobby input { background: rgba(10,8,6,.75); color: var(--parch); border: 1px solid rgba(176,129,74,.5); box-shadow: inset 0 2px 6px rgba(0,0,0,.6); }
+#login input::placeholder, #lobby input::placeholder { color: rgba(201,184,151,.55); }
+#login input:focus, #lobby input:focus { border-color: var(--bronze-hi); box-shadow: inset 0 2px 6px rgba(0,0,0,.6), 0 0 0 3px rgba(242,201,135,.2); }
+/* Botón principal: placa de bronce pulido */
+#login .btn.primary, #lobby .btn.primary {
+  color: #2a1a08; text-shadow: 0 1px 0 rgba(255,235,190,.6); border-color: #4a3014; font-family: var(--display-2); font-weight: 800; letter-spacing: .04em;
+  background: linear-gradient(180deg, #ffe2a6, #d9a35e 45%, #a16e34 55%, #c99050);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.6), inset 0 -2px 0 rgba(60,35,10,.5), 0 0 22px rgba(255,170,90,.25), 0 6px 14px rgba(0,0,0,.6);
+}
+#login .btn:not(.primary):not(.google), #lobby .btn:not(.primary) { background: linear-gradient(180deg, #3a2d21, #1f1812); border-color: var(--bronze-lo); }
+#lobby .home-bar { background: linear-gradient(180deg, rgba(30,23,17,.95), rgba(14,11,8,.92)); border-bottom: 2px solid var(--bronze); }
+.home-play h2, .tabs button { font-family: var(--display-2); font-weight: 800; letter-spacing: .03em; }
+.home-play h2 { color: var(--bronze-hi); }
+.tabs button.on { color: var(--bronze-hi); border-bottom-color: var(--bronze); }
+.logo-bar { height: 40px; width: auto; display: block; filter: drop-shadow(0 3px 6px rgba(0,0,0,.6)); }
+.topbar .logo-bar { height: 34px; }
+@media (max-width: 600px) { #login .lobby-card { margin-top: 140px; } .logo-hero { top: -150px; } }
+@media (prefers-reduced-motion: reduce) { .rune-ring, .embers i, .logo-hero, .logo-hero::after { animation: none !important; } .embers { display: none; } }

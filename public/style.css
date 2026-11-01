@@ -623,3 +623,28 @@ html.has-mats-tavern .mat .battlefield { margin: 2.2% 2.6%; }
 /* Pasar turno: al borde derecho del tapete, a media altura (como en Hearthstone) */
 .panel > .end-turn { position: absolute; right: -6px; top: 34%; transform: translateY(-50%); z-index: 4; }
 html.has-ui-end-turn .panel > .end-turn { width: 150px; height: 84px; font-size: 16px; }
+
+/* ---------- Tapetes elegibles ---------- */
+.mat.custom { box-shadow: inset 0 0 0 3px var(--gold-lo), inset 0 0 0 5px rgba(0,0,0,.45), inset 0 8px 24px rgba(0,0,0,.4); border-radius: 12px; }
+html.has-mats-tavern .mat.custom .battlefield { margin: 1.2%; }
+.mat.custom .empty-hint { color: #fff; text-shadow: var(--outline); }
+.mat-section { margin: 16px 0 8px; font: 18px var(--display); color: var(--gold-hi); text-shadow: var(--outline); }
+.mat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.mat-grid.colors { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+.mat-option {
+  position: relative; aspect-ratio: 16 / 9; border-radius: 10px; cursor: pointer; overflow: hidden;
+  background: var(--wood) center / cover no-repeat; border: 3px solid var(--gold-lo); box-shadow: 0 4px 10px rgba(0,0,0,.5);
+  display: flex; align-items: flex-end; padding: 0; text-align: left;
+}
+.mat-option span { width: 100%; padding: 3px 8px; font: 13px var(--display); color: #fff; text-shadow: var(--outline); background: linear-gradient(0deg, rgba(0,0,0,.65), transparent); text-transform: capitalize; }
+.mat-option.swatch { aspect-ratio: 3 / 2; }
+.mat-option:hover { border-color: var(--gold); transform: translateY(-2px); }
+.mat-option.on { border-color: var(--green); box-shadow: 0 0 0 2px var(--green), 0 0 18px rgba(91,227,90,.5); }
+
+/* Barra superior: nada se parte en dos líneas */
+.topbar > * { flex-shrink: 0; white-space: nowrap; }
+.turn-box { white-space: nowrap; }
+.topbar .brand.small { font-size: 20px; }
+/* Las zonas no tapan el tapete con un rectángulo: solo el marco */
+.panel .zones { background: none; }
+html.has-zones-frame .pile { background: rgba(10,6,3,.5); }

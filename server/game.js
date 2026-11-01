@@ -102,6 +102,7 @@ export function addPlayer(room, name, { controlledBy = null, userId = null } = {
     poison: 0,
     cmdDamage: {},
     mana: emptyMana(),
+    mat: null, // tapete elegido: { kind: 'color'|'image', value } (null = el de la taberna)
     zones: emptyZones(),
     deck: null, // lista original para reiniciar
     connected: true,
@@ -160,6 +161,14 @@ function findOnAnyBattlefield(room, iid) {
   const hit = allBattlefieldCards(room).find((x) => x.card.iid === iid);
   if (!hit) throw new GameError('Ese permanente no está en el campo');
   return hit;
+}
+
+/** Tapete: un color #rrggbb o una imagen dentro de assets/mats. */
+export function sanitizeMat(mat) {
+  if (!mat || typeof mat !== 'object') return null;
+  if (mat.kind === 'color' && /^#[0-9a-f]{6}$/i.test(mat.value)) return { kind: 'color', value: mat.value.toLowerCase() };
+  if (mat.kind === 'image' && /^mats\/[\w.-]{1,80}\.(webp|png|jpe?g)$/i.test(mat.value) && !mat.value.includes('..')) return { kind: 'image', value: mat.value };
+  throw new GameError('Tapete inválido');
 }
 
 /** Una carta visible para todos (campo, cementerio, exilio o mando) de cualquier jugador. */
@@ -601,6 +610,10 @@ export function applyAction(room, playerId, action) {
     case 'clearArrows':
       room.arrows = room.arrows.filter((ar) => ar.owner !== p.id);
       return {};
+    case 'setMat': {
+      p.mat = sanitizeMat(a.mat);
+      return {};
+    }
     case 'react': {
       const emoji = REACTIONS[a.kind];
       if (!emoji) throw new GameError('Reacción desconocida');
@@ -794,6 +807,7 @@ export function viewFor(room, viewerId) {
         poison: p.poison,
         cmdDamage: p.cmdDamage,
         mana: p.mana,
+        mat: p.mat,
         connected: p.connected,
         controlledBy: p.controlledBy,
         hasDeck: Boolean(p.deck),

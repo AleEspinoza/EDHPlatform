@@ -39,8 +39,10 @@ const ASSETS = [
 ];
 const assetUrls = {};
 const assetSlug = (name) => name.replace(/\//g, '-');
+let matImages = []; // imágenes disponibles en assets/mats
 const assetsReady = fetch('/assets-manifest.json').then((r) => r.json()).then(({ files }) => {
   const have = new Set(files);
+  matImages = files.filter((f) => f.startsWith('mats/'));
   for (const name of ASSETS) {
     const file = ['webp', 'png', 'jpg'].map((ext) => `${name}.${ext}`).find((f) => have.has(f));
     if (!file) continue;
@@ -119,6 +121,10 @@ socket.on('state', (s) => {
   state = s;
   if (!handSeat || !isMine(handSeat)) handSeat = state.you;
   render();
+  if (first) {
+    const saved = store.get('edh.mat', null);
+    if (saved && JSON.stringify(saved) !== JSON.stringify(me()?.mat ?? null)) send({ type: 'setMat', mat: saved });
+  }
   if (first && !me()?.hasDeck) openDeckModal(state.you);
 });
 socket.on('event', (ev) => {
@@ -374,6 +380,7 @@ function render() {
   for (const iid of entering) document.querySelector(`.battlefield .card[data-iid="${CSS.escape(iid)}"]`)?.classList.add('enter');
   requestAnimationFrame(drawArrows);
   if (zoneView && !zoneView.library) renderZoneModal();
+  if (!$('#modal-mat').classList.contains('hidden')) renderMatPicker();
 }
 addEventListener('resize', () => { if (state) { renderHand(); drawArrows(); } });
 
@@ -608,13 +615,46 @@ function renderPanel(p) {
   }, h('span', {}, myTurn ? 'Pasar turno' : 'Turno rival')) : null;
 
   return h('div', { class: `panel${isMe ? ' mine' : ' opp'}${state.activePlayerId === p.id ? ' active' : ''}${focusPid === p.id ? ' focused' : ''}`, style: { '--pc': p.color }, dataset: { pid: p.id } },
-    h('div', { class: 'mat' }, renderBattlefield(p, mine)),
+    h('div', { class: `mat${p.mat ? ` custom ${p.mat.kind}` : ''}`, style: matStyle(p.mat) }, renderBattlefield(p, mine)),
     endTurn,
     h('div', { class: 'rail' },
       hero,
       h('div', { class: 'rail-spacer' }),
       h('div', { class: 'zones' }, pile(p, 'library'), pile(p, 'graveyard'), pile(p, 'exile'), ...commandSlots)));
 }
+
+// ---------- Tapetes ----------
+const MAT_COLORS = [
+  ['Naranja', '#F07857'], ['Verde azulado', '#43A5BE'], ['Verde mar', '#53BDA5'], ['Arena', '#F5C26B'], ['Casi negro', '#253342'],
+  ['Gris claro', '#CBD6E2'], ['Verde', '#4FB06D'], ['Azul marino', '#1260B0'], ['Rosa', '#EBB8DD'], ['Índigo', '#5C62D6'],
+  ['Blanco', '#FFFFFF'], ['Magenta', '#BE398D'], ['Dorado', '#D49137'], ['Menta', '#CAE7D3'], ['Rojo oscuro', '#BF2C34'],
+];
+function matStyle(mat) {
+  if (mat?.kind === 'color') return { background: `radial-gradient(120% 100% at 50% 40%, rgba(255,255,255,.12), transparent 60%), radial-gradient(140% 120% at 50% 50%, transparent 55%, rgba(0,0,0,.35)), ${mat.value}` };
+  if (mat?.kind === 'image') return { background: `url("/assets/${mat.value}") center / cover no-repeat` };
+  return {};
+}
+const matName = (file) => (file === 'mats/tavern.webp' ? 'Taberna (por defecto)' : file.replace(/^mats\//, '').replace(/\.\w+$/, '').replace(/[-_]+/g, ' '));
+async function chooseMat(mat) {
+  const res = await send({ type: 'setMat', mat });
+  if (!res?.ok) return;
+  store.set('edh.mat', mat);
+  renderMatPicker();
+}
+function renderMatPicker() {
+  const current = me()?.mat ?? null;
+  const same = (m) => JSON.stringify(m ?? null) === JSON.stringify(current);
+  $('#mat-images').replaceChildren(...[null, ...matImages.filter((f) => f !== 'mats/tavern.webp').map((f) => ({ kind: 'image', value: f }))].map((m) => h('button', {
+    class: `mat-option${same(m) ? ' on' : ''}`, title: m ? matName(m.value) : 'Taberna (por defecto)',
+    style: m ? { backgroundImage: `url("/assets/${m.value}")` } : { backgroundImage: asset('mats/tavern') ? `url("${asset('mats/tavern')}")` : '' },
+    onclick: () => chooseMat(m),
+  }, h('span', {}, m ? matName(m.value) : 'Taberna'))));
+  $('#mat-colors').replaceChildren(...MAT_COLORS.map(([name, hex]) => {
+    const m = { kind: 'color', value: hex.toLowerCase() };
+    return h('button', { class: `mat-option swatch${same(m) ? ' on' : ''}`, title: `${name} ${hex}`, style: { background: hex }, onclick: () => chooseMat(m) }, h('span', {}, name));
+  }));
+}
+$('#btn-mat').addEventListener('click', () => { renderMatPicker(); openModal('#modal-mat'); });
 
 const MANA_COLORS = [['W', '#f4ecc8', 'Blanco'], ['U', '#4f8fd8', 'Azul'], ['B', '#4b3f52', 'Negro'], ['R', '#d9553f', 'Rojo'], ['G', '#3f9b5c', 'Verde'], ['C', '#b9b3a8', 'Incoloro']];
 function renderMana(p, mine) {

@@ -380,3 +380,15 @@ test('enviar mis cartas a las zonas de otro jugador', () => {
   assert.equal(b.zones.battlefield.at(-1).iid, mine.iid);
   assert.equal(a.zones.battlefield.some((c) => c.iid === mine.iid), false);
 });
+
+test('tapetes: color o imagen de assets/mats, visibles para todos', () => {
+  const { room, a, b } = setup();
+  applyAction(room, a.id, { type: 'setMat', mat: { kind: 'color', value: '#43A5BE' } });
+  assert.deepEqual(viewFor(room, b.id).players[0].mat, { kind: 'color', value: '#43a5be' });
+  applyAction(room, a.id, { type: 'setMat', mat: { kind: 'image', value: 'mats/forest.webp' } });
+  assert.equal(a.mat.value, 'mats/forest.webp');
+  assert.throws(() => applyAction(room, a.id, { type: 'setMat', mat: { kind: 'image', value: '../../server/db.js' } }), /inválido/);
+  assert.throws(() => applyAction(room, a.id, { type: 'setMat', mat: { kind: 'color', value: 'red;background:url(x)' } }), /inválido/);
+  applyAction(room, a.id, { type: 'setMat', mat: null });
+  assert.equal(a.mat, null);
+});

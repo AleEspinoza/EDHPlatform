@@ -1,6 +1,6 @@
 # EDH Platform
 
-Versión 0.7
+Versión 0.8
 
 Mesa virtual de Commander/EDH con salas privadas, mazos importados y todas las acciones del juego en tiempo real.
 
@@ -14,7 +14,9 @@ Mesa virtual de Commander/EDH con salas privadas, mazos importados y todas las a
 - **Terminar partida** eligiendo al ganador (o empate), con revancha opcional; queda en el historial de cada jugador. Si la sala se cierra a mitad de partida, se guarda como «sin terminar».
 - **Mazos guardados**: créalos desde el inicio o al cargarlos en una sala; jugar uno es un clic, sin volver a consultar Scryfall.
 - **Atajos idénticos a EDHPlay** y reasignables (tecla `I` o botón ⌨): `Espacio` pasar turno, `D` robar, `U` enderezar, `Q` avanzar fase, `M` maná, `V` ver biblioteca, `P`/`Shift+P` ver tope/fondo, `O` moneda, `N` ficha; sobre una carta `T` girar, `A` al campo, `G` cementerio, `E` exilio, `H` mano, `L`/`B` tope/fondo, `Z` boca abajo, `F` voltear, `X` copia, `W` flecha, `+`/`_` contadores, `Alt+1..4` fuerza/resistencia; `1–6` enfocar jugador y `7–0` reacciones.
-- **Selección múltiple** (Shift+clic o `Ctrl+A`), **flechas** entre cartas o hacia un jugador, **fases** del turno, **rastreador de maná** y **modificadores +X/+Y**.
+- **Tapetes a elección**: cada jugador elige el suyo (imagen o uno de 15 colores planos) y todos lo ven; se recuerda entre partidas. Para agregar imágenes basta dejarlas en `public/assets/mats/`.
+- **Enviar cartas a otros jugadores**: arrastrándolas a su campo, mano (✋), cementerio, exilio o biblioteca, o con «Enviar a…»; siguen siendo tuyas como dueño.
+- **Selección múltiple** (Shift+clic o `Ctrl+A`), **flechas** desde una carta hacia otra carta, una zona (incluida la mano), un jugador o cualquier punto de la mesa, **fases** del turno, **rastreador de maná** y **modificadores +X/+Y**.
 - **Importar desde Moxfield por link** (apagado por defecto; ver abajo).
 - **Importar mazo** pegando la lista (Moxfield, Archidekt, MTGO: `1 Sol Ring (C21) 263`). Imágenes desde Scryfall, cartas de dos caras con transformar.
 - **Zonas**: biblioteca, mano, campo de batalla, cementerio, exilio y zona de mando.

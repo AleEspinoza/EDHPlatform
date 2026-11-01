@@ -77,7 +77,7 @@
       <span id="solo-chip" class="chip solo-chip hidden">Práctica en solitario</span>
       <button id="btn-seat" class="btn small hidden" title="Agregar un asiento que controlas tú">+ Asiento</button>
       <div class="turn-box">
-        <span class="muted">Turno <b id="turn-num">0</b>:</span> <b id="turn-player"></b>
+        <span class="muted">Turno <b id="turn-num">0</b></span> <b id="turn-player"></b>
         <button id="phase-chip" class="chip phase-chip" title="Avanzar fase (Q)"></button>
       </div>
       <div class="spacer"></div>
@@ -91,6 +91,7 @@
       <button id="btn-coin" class="btn small ghost" title="Lanzar moneda">🪙</button>
       <button id="btn-token" class="btn small ghost">+ Token</button>
       <button id="btn-deck" class="btn small">Mazo</button>
+      <button id="btn-mat" class="btn small" title="Elegir tu tapete">Tapete</button>
       <button id="btn-end" class="btn small">Terminar partida</button>
       <button id="btn-keys" class="btn small ghost" title="Atajos de teclado (K)">⌨</button>
       <button id="btn-help" class="btn small ghost" title="Ayuda">?</button>
@@ -236,6 +237,20 @@
       </div>
       <p class="muted small">Haz clic en una tecla para cambiarla y luego presiona la nueva. Las acciones sobre «la carta» usan la que tengas bajo el mouse.</p>
       <div id="keys-list" class="keys-list"></div>
+    </div>
+  </div>
+
+  <div id="modal-mat" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="mat-title">
+    <div class="modal-box wide">
+      <div class="modal-head">
+        <h2 id="mat-title">Tu tapete</h2>
+        <div class="modal-actions inline"><button class="btn small ghost" data-close>Cerrar</button></div>
+      </div>
+      <p class="muted small">Todos los jugadores ven el tapete que elijas. Se recuerda para tus próximas partidas.</p>
+      <h3 class="mat-section">Imágenes</h3>
+      <div id="mat-images" class="mat-grid"></div>
+      <h3 class="mat-section">Colores planos</h3>
+      <div id="mat-colors" class="mat-grid colors"></div>
     </div>
   </div>
 

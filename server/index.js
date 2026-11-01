@@ -46,8 +46,8 @@ function seat(socket, room, player) {
 const reply = (ack, payload) => typeof ack === 'function' && ack(payload);
 
 io.on('connection', (socket) => {
-  socket.on('createRoom', ({ name } = {}, ack) => {
-    const room = createRoom(newCode());
+  socket.on('createRoom', ({ name, solo } = {}, ack) => {
+    const room = createRoom(newCode(), { solo: Boolean(solo) });
     rooms.set(room.code, room);
     const player = addPlayer(room, name);
     seat(socket, room, player);
@@ -61,6 +61,7 @@ io.on('connection', (socket) => {
     try {
       let player = token && room.players.find((p) => p.token === token);
       if (player) log(room, `${player.name} se reconectó`);
+      else if (room.solo) return reply(ack, { ok: false, error: 'Esa sala es una partida de práctica privada' });
       else player = addPlayer(room, name);
       seat(socket, room, player);
       reply(ack, { ok: true, code: room.code, playerId: player.id, token: player.token });
@@ -90,7 +91,7 @@ io.on('connection', (socket) => {
       removePlayer(room, socket.data.playerId);
       socket.leave(room.code);
       socket.data.code = null;
-      if (room.players.length === 0) rooms.delete(room.code);
+      if (room.solo || !room.players.some((p) => !p.controlledBy)) rooms.delete(room.code);
       else broadcast(room);
     }
     reply(ack, { ok: true });
@@ -113,7 +114,7 @@ io.on('connection', (socket) => {
 setInterval(() => {
   const now = Date.now();
   for (const [code, room] of rooms) {
-    if (now - room.lastActive > ROOM_TTL_MS && !room.players.some((p) => p.connected)) rooms.delete(code);
+    if (now - room.lastActive > ROOM_TTL_MS && !room.players.some((p) => p.connected && !p.controlledBy)) rooms.delete(code);
   }
 }, 10 * 60 * 1000).unref();
 

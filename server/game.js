@@ -27,6 +27,8 @@ const frac = (v, def) => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : def;
 };
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuid = (v) => (typeof v === 'string' && UUID.test(v) ? v.toLowerCase() : null);
 const httpsUrl = (v) => (typeof v === 'string' && /^https:\/\/[^\s"'<>]+$/.test(v) ? v.slice(0, 500) : null);
 
 function emptyZones() {
@@ -48,6 +50,10 @@ function makeCard(data, extra = {}) {
     image: httpsUrl(data.image),
     backImage: httpsUrl(data.backImage),
     typeLine: str(data.typeLine, 150),
+    scryfallId: uuid(data.scryfallId),
+    tokens: sanitizeTokens(data.tokens),
+    ownerId: null,
+    attachedTo: null, // iid del permanente al que está adjunta
     tapped: false,
     faceDown: false,
     transformed: false,
@@ -60,18 +66,24 @@ function makeCard(data, extra = {}) {
   };
 }
 
+function sanitizeTokens(list) {
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 12).map((t) => ({ name: str(t?.name, 80), id: uuid(t?.id) })).filter((t) => t.name && t.id);
+}
+
 function resetCardState(card) {
+  card.attachedTo = null;
   card.tapped = false;
   card.faceDown = false;
   card.transformed = false;
   card.counters = 0;
 }
 
-export function createRoom(code) {
-  return { code, createdAt: Date.now(), lastActive: Date.now(), players: [], log: [], activePlayerId: null, turn: 0 };
+export function createRoom(code, { solo = false } = {}) {
+  return { code, solo, hostId: null, createdAt: Date.now(), lastActive: Date.now(), players: [], log: [], activePlayerId: null, turn: 0 };
 }
 
-export function addPlayer(room, name) {
+export function addPlayer(room, name, { controlledBy = null } = {}) {
   if (room.players.length >= MAX_PLAYERS) throw new GameError('La sala está llena');
   const used = new Set(room.players.map((p) => p.color));
   const player = {
@@ -85,18 +97,24 @@ export function addPlayer(room, name) {
     zones: emptyZones(),
     deck: null, // lista original para reiniciar
     connected: true,
+    controlledBy, // asiento extra del modo solitario, manejado por este jugador
   };
   room.players.push(player);
   if (!room.activePlayerId) room.activePlayerId = player.id;
-  log(room, `${player.name} se unió a la sala`);
+  if (!room.hostId) room.hostId = player.id;
+  log(room, controlledBy ? `Se agregó el asiento ${player.name}` : `${player.name} se unió a la sala`);
   return player;
 }
 
 export function removePlayer(room, playerId) {
   const idx = room.players.findIndex((p) => p.id === playerId);
   if (idx === -1) return;
-  const [p] = room.players.splice(idx, 1);
+  const p = room.players[idx];
+  releaseCards(room, p);
+  room.players.splice(idx, 1);
+  cleanupAttachments(room);
   for (const other of room.players) delete other.cmdDamage[p.id];
+  if (room.hostId === p.id) room.hostId = room.players.find((o) => !o.controlledBy)?.id ?? null;
   if (room.activePlayerId === p.id) room.activePlayerId = room.players[idx % room.players.length]?.id ?? null;
   log(room, `${p.name} salió de la sala`);
 }
@@ -118,6 +136,48 @@ function findCard(player, iid) {
     if (index !== -1) return { zone, index, card: player.zones[zone][index] };
   }
   throw new GameError('Carta no encontrada');
+}
+
+function ownerOf(room, card, fallback) {
+  return room.players.find((pl) => pl.id === card.ownerId) ?? fallback;
+}
+
+function allBattlefieldCards(room) {
+  return room.players.flatMap((pl) => pl.zones.battlefield.map((card) => ({ card, controller: pl })));
+}
+
+/** Busca un permanente en el campo de cualquier jugador. */
+function findOnAnyBattlefield(room, iid) {
+  const hit = allBattlefieldCards(room).find((x) => x.card.iid === iid);
+  if (!hit) throw new GameError('Ese permanente no está en el campo');
+  return hit;
+}
+
+/** Suelta lo que estaba adjunto a una carta que deja el campo. */
+function detachFrom(room, hostIid) {
+  for (const { card } of allBattlefieldCards(room)) if (card.attachedTo === hostIid) card.attachedTo = null;
+}
+
+function cleanupAttachments(room) {
+  const onField = new Set(allBattlefieldCards(room).map((x) => x.card.iid));
+  for (const { card } of allBattlefieldCards(room)) if (card.attachedTo && !onField.has(card.attachedTo)) card.attachedTo = null;
+}
+
+/**
+ * Devuelve a sus dueños las cartas ajenas que controla `p` y retira las cartas de `p`
+ * que controlan otros. Se usa al reiniciar o salir de la sala.
+ */
+function releaseCards(room, p) {
+  for (const q of room.players) {
+    if (q === p) continue;
+    for (const zone of ZONES) q.zones[zone] = q.zones[zone].filter((c) => c.ownerId !== p.id);
+  }
+  for (const zone of ZONES) {
+    for (const c of p.zones[zone]) {
+      const owner = ownerOf(room, c, p);
+      if (owner !== p && !c.token) owner.zones.battlefield.push(c);
+    }
+  }
 }
 
 function battlefieldCard(player, iid) {
@@ -148,6 +208,9 @@ function moveCard(room, p, iid, to, opts = {}) {
   if (!ZONES.includes(to)) throw new GameError('Zona inválida');
   const { zone: from, index, card } = findCard(p, iid);
   p.zones[from].splice(index, 1);
+  // Al dejar el campo, la carta vuelve a las zonas de su dueño (cambio de control).
+  const dest = to === 'battlefield' ? p : ownerOf(room, card, p);
+  if (from === 'battlefield' && to !== 'battlefield') detachFrom(room, card.iid);
   const entersFaceDown = from !== 'battlefield' && to === 'battlefield' && Boolean(opts.faceDown);
   const name = publicName(card, from, to, entersFaceDown);
 
@@ -167,22 +230,37 @@ function moveCard(room, p, iid, to, opts = {}) {
     card.y = frac(opts.y, card.y);
   }
 
-  if (opts.position === 'bottom') p.zones[to].unshift(card);
-  else p.zones[to].push(card);
+  if (opts.position === 'bottom') dest.zones[to].unshift(card);
+  else dest.zones[to].push(card);
 
   if (from === to && to === 'battlefield') return; // solo reposicionó
   const where = to === 'library' && opts.position === 'bottom' ? 'al fondo de la biblioteca' : ZONE_TO[to];
-  log(room, `${p.name} mueve ${name} ${ZONE_FROM[from]} ${where}${entersFaceDown ? ' boca abajo' : ''}`);
+  const whose = dest !== p ? ` de ${dest.name}` : '';
+  log(room, `${p.name} mueve ${name} ${ZONE_FROM[from]} ${where}${whose}${entersFaceDown ? ' boca abajo' : ''}`);
 }
 
 function sanitizeDeckCard(c) {
-  return { name: str(c?.name, 150), image: httpsUrl(c?.image), backImage: httpsUrl(c?.backImage), typeLine: str(c?.typeLine, 150) };
+  return {
+    name: str(c?.name, 150), image: httpsUrl(c?.image), backImage: httpsUrl(c?.backImage),
+    typeLine: str(c?.typeLine, 150), scryfallId: uuid(c?.scryfallId), tokens: sanitizeTokens(c?.tokens),
+  };
 }
 
-function setupDeck(p) {
+function setupDeck(room, p) {
+  releaseCards(room, p);
   p.zones = emptyZones();
-  p.zones.command = p.deck.commanders.map((c) => makeCard(c, { commander: true }));
-  p.zones.library = shuffle(p.deck.cards.map((c) => makeCard(c)));
+  p.zones.command = p.deck.commanders.map((c) => makeCard(c, { commander: true, ownerId: p.id }));
+  p.zones.library = shuffle(p.deck.cards.map((c) => makeCard(c, { ownerId: p.id })));
+  cleanupAttachments(room);
+}
+
+/** En el modo solitario, el anfitrión puede actuar por los asientos que controla. */
+function resolveActor(room, playerId, seatId) {
+  const p = getPlayer(room, playerId);
+  if (!seatId || seatId === playerId) return p;
+  const seat = getPlayer(room, str(seatId, 64));
+  if (seat.controlledBy !== p.id) throw new GameError('No controlas ese asiento');
+  return seat;
 }
 
 /**
@@ -191,7 +269,7 @@ function setupDeck(p) {
  */
 export function applyAction(room, playerId, action) {
   if (!action || typeof action.type !== 'string') throw new GameError('Acción inválida');
-  const p = getPlayer(room, playerId);
+  const p = resolveActor(room, playerId, action.seat);
   room.lastActive = Date.now();
   const a = action;
 
@@ -202,7 +280,7 @@ export function applyAction(room, playerId, action) {
       if (cards.length + commanders.length > 300) throw new GameError('Mazo demasiado grande');
       if (cards.length === 0 && commanders.length === 0) throw new GameError('El mazo está vacío');
       p.deck = { cards: cards.map(sanitizeDeckCard), commanders: commanders.slice(0, 4).map(sanitizeDeckCard) };
-      setupDeck(p);
+      setupDeck(room, p);
       p.life = STARTING_LIFE;
       p.poison = 0;
       p.cmdDamage = {};
@@ -275,18 +353,74 @@ export function applyAction(room, playerId, action) {
       const c = battlefieldCard(p, str(a.iid, 64));
       c.x = frac(a.x, c.x);
       c.y = frac(a.y, c.y);
+      if (c.attachedTo && a.detach !== false) {
+        c.attachedTo = null;
+        log(room, `${p.name} desadjunta ${c.faceDown ? 'una carta' : c.name}`);
+      }
+      return {};
+    }
+    case 'attach': {
+      const c = battlefieldCard(p, str(a.iid, 64));
+      const { card: host, controller } = findOnAnyBattlefield(room, str(a.target, 64));
+      if (host.iid === c.iid) throw new GameError('Una carta no puede adjuntarse a sí misma');
+      for (let h = host; h; h = h.attachedTo && findOnAnyBattlefield(room, h.attachedTo).card) {
+        if (h.attachedTo === c.iid) throw new GameError('Eso formaría un ciclo de adjuntos');
+      }
+      detachFrom(room, c.iid);
+      c.attachedTo = host.iid;
+      c.tapped = false;
+      const hostName = host.faceDown ? 'una carta boca abajo' : host.name;
+      log(room, `${p.name} adjunta ${c.faceDown ? 'una carta' : c.name} a ${hostName}${controller !== p ? ` de ${controller.name}` : ''}`);
+      return {};
+    }
+    case 'detach': {
+      const c = battlefieldCard(p, str(a.iid, 64));
+      c.attachedTo = null;
+      c.y = Math.min(1, c.y + 0.15);
+      log(room, `${p.name} desadjunta ${c.faceDown ? 'una carta' : c.name}`);
+      return {};
+    }
+    case 'giveControl': {
+      const target = getPlayer(room, str(a.to, 64));
+      if (target === p) throw new GameError('Ya controlas esa carta');
+      const { index, card } = findCard(p, str(a.iid, 64));
+      if (p.zones.battlefield[index] !== card) throw new GameError('Solo se puede ceder el control de permanentes');
+      p.zones.battlefield.splice(index, 1);
+      card.x = 0.4 + Math.random() * 0.2;
+      card.y = 0.45;
+      target.zones.battlefield.push(card);
+      log(room, `${p.name} le da el control de ${card.faceDown ? 'una carta boca abajo' : card.name} a ${target.name}`);
+      return {};
+    }
+    case 'targetZone':
+      return targetZone(room, p, getPlayer(room, str(a.target, 64)), a.op, int(a.n, 1, 30, 1));
+    case 'addSeat': {
+      if (!room.solo) throw new GameError('Solo se pueden agregar asientos en modo solitario');
+      if (p.controlledBy) throw new GameError('Agrega asientos desde tu propio jugador');
+      const seat = addPlayer(room, str(a.name, 24).trim() || `Asiento ${room.players.length + 1}`, { controlledBy: p.id });
+      if (p.deck && a.copyDeck) {
+        seat.deck = structuredClone(p.deck);
+        setupDeck(room, seat);
+      }
+      return {};
+    }
+    case 'removeSeat': {
+      const seat = getPlayer(room, str(a.target, 64));
+      if (seat.controlledBy !== p.id) throw new GameError('Ese asiento no es tuyo');
+      removePlayer(room, seat.id);
       return {};
     }
     case 'token': {
       const name = str(a.name, 60).trim() || 'Token';
-      const c = makeCard({ name, typeLine: 'Token', image: a.image }, { token: true, x: 0.45, y: 0.4 });
+      const c = makeCard({ name, typeLine: str(a.typeLine, 150) || 'Token', image: a.image, backImage: a.backImage, scryfallId: a.scryfallId },
+        { token: true, ownerId: p.id, x: frac(a.x, 0.45), y: frac(a.y, 0.4) });
       p.zones.battlefield.push(c);
       log(room, `${p.name} crea un token: ${name}`);
       return {};
     }
     case 'clone': {
       const src = battlefieldCard(p, str(a.iid, 64));
-      const c = makeCard(src, { token: true, x: Math.min(1, src.x + 0.04), y: Math.min(1, src.y + 0.04) });
+      const c = makeCard(src, { token: true, ownerId: p.id, x: Math.min(1, src.x + 0.04), y: Math.min(1, src.y + 0.04) });
       p.zones.battlefield.push(c);
       log(room, `${p.name} crea una copia de ${src.name}`);
       return {};
@@ -347,7 +481,7 @@ export function applyAction(room, playerId, action) {
     }
     case 'reset': {
       if (!p.deck) throw new GameError('No hay mazo cargado');
-      setupDeck(p);
+      setupDeck(room, p);
       p.life = STARTING_LIFE;
       p.poison = 0;
       p.cmdDamage = {};
@@ -362,6 +496,50 @@ export function applyAction(room, playerId, action) {
     }
     default:
       throw new GameError(`Acción desconocida: ${a.type}`);
+  }
+}
+
+// ---------- Acciones sobre zonas de otro jugador ----------
+// Como en papel, se confía en los jugadores: todo queda en el log público.
+function targetZone(room, p, target, op, n) {
+  const lib = target.zones.library;
+  const takeTop = (to) => {
+    const moved = [];
+    for (let i = 0; i < n && lib.length; i++) {
+      const c = lib.pop();
+      target.zones[to].push(c);
+      moved.push(c.name);
+    }
+    return moved;
+  };
+  switch (op) {
+    case 'mill': {
+      const moved = takeTop('graveyard');
+      log(room, `${p.name} muele ${moved.length} de la biblioteca de ${target.name}: ${moved.join(', ') || '—'}`);
+      return {};
+    }
+    case 'exileTop': {
+      const moved = takeTop('exile');
+      log(room, `${p.name} exilia ${moved.length} del tope de la biblioteca de ${target.name}: ${moved.join(', ') || '—'}`);
+      return {};
+    }
+    case 'revealTop': {
+      const cards = lib.slice(-n).reverse().map((c) => ({ name: c.name, image: c.image }));
+      log(room, `${p.name} revela el tope de la biblioteca de ${target.name}: ${cards.map((c) => c.name).join(', ') || '—'}`);
+      return { event: { kind: 'revealHand', player: `Tope de la biblioteca de ${target.name}`, cards } };
+    }
+    case 'discardRandom': {
+      if (!target.zones.hand.length) throw new GameError(`${target.name} no tiene cartas en la mano`);
+      const [c] = target.zones.hand.splice(randomInt(target.zones.hand.length), 1);
+      target.zones.graveyard.push(c);
+      log(room, `${p.name} hace que ${target.name} descarte al azar: ${c.name}`);
+      return {};
+    }
+    case 'requestHand':
+      log(room, `${p.name} pide a ${target.name} que revele su mano`);
+      return { event: { kind: 'handRequest', from: p.name, target: target.id } };
+    default:
+      throw new GameError('Acción de zona desconocida');
   }
 }
 
@@ -432,7 +610,10 @@ function chatCommand(room, p, text) {
   }
 }
 
-const HIDDEN_CARD = (c) => ({ iid: c.iid, faceDown: true, tapped: c.tapped, x: c.x, y: c.y, counters: c.counters, token: c.token });
+const HIDDEN_CARD = (c) => ({
+  iid: c.iid, faceDown: true, tapped: c.tapped, x: c.x, y: c.y, counters: c.counters, token: c.token,
+  attachedTo: c.attachedTo, ownerId: c.ownerId,
+});
 
 /** Vista del estado para un jugador: oculta mano y biblioteca ajenas y cartas boca abajo. */
 export function viewFor(room, viewerId) {
@@ -441,9 +622,11 @@ export function viewFor(room, viewerId) {
     activePlayerId: room.activePlayerId,
     turn: room.turn,
     you: viewerId,
+    solo: room.solo,
+    hostId: room.hostId,
     log: room.log.slice(-150),
     players: room.players.map((p) => {
-      const mine = p.id === viewerId;
+      const mine = p.id === viewerId || p.controlledBy === viewerId;
       return {
         id: p.id,
         name: p.name,
@@ -452,6 +635,7 @@ export function viewFor(room, viewerId) {
         poison: p.poison,
         cmdDamage: p.cmdDamage,
         connected: p.connected,
+        controlledBy: p.controlledBy,
         hasDeck: Boolean(p.deck),
         commanderNames: p.deck?.commanders.map((c) => c.name) ?? [],
         counts: Object.fromEntries(ZONES.map((z) => [z, p.zones[z].length])),

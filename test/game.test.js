@@ -178,3 +178,97 @@ test('anunciar trigger de una carta pública pero no de la mano', () => {
   const ev = applyAction(room, a.id, { type: 'announce', kind: 'trigger', iid: c2.iid }).event;
   assert.equal(ev.card.name, c2.name);
 });
+
+// ---------- v0.3: adjuntar, control, zonas ajenas, solitario ----------
+function playOne(room, p) {
+  applyAction(room, p.id, { type: 'draw', n: 1 });
+  const iid = p.zones.hand.at(-1).iid;
+  applyAction(room, p.id, { type: 'move', iid, to: 'battlefield', x: 0.5, y: 0.5 });
+  return p.zones.battlefield.find((c) => c.iid === iid);
+}
+
+test('adjuntar a un permanente propio o rival, y soltar cuando el anfitrión deja el campo', () => {
+  const { room, a, b } = setup();
+  applyAction(room, b.id, { type: 'setDeck', cards: deck(20), commanders: [] });
+  const aura = playOne(room, a);
+  const host = playOne(room, b);
+  applyAction(room, a.id, { type: 'attach', iid: aura.iid, target: host.iid });
+  assert.equal(aura.attachedTo, host.iid);
+  assert.match(room.log.at(-1).text, /adjunta .* de Rival/);
+  applyAction(room, b.id, { type: 'move', iid: host.iid, to: 'graveyard' });
+  assert.equal(aura.attachedTo, null, 'se suelta al morir el anfitrión');
+  assert.throws(() => applyAction(room, a.id, { type: 'attach', iid: aura.iid, target: aura.iid }), /sí misma/);
+});
+
+test('mover una carta adjunta la desadjunta; los ciclos se rechazan', () => {
+  const { room, a } = setup();
+  const x = playOne(room, a);
+  const y = playOne(room, a);
+  applyAction(room, a.id, { type: 'attach', iid: x.iid, target: y.iid });
+  assert.throws(() => applyAction(room, a.id, { type: 'attach', iid: y.iid, target: x.iid }), /ciclo/);
+  applyAction(room, a.id, { type: 'setPos', iid: x.iid, x: 0.1, y: 0.1 });
+  assert.equal(x.attachedTo, null);
+});
+
+test('cambio de control: el controlador la maneja y al salir del campo vuelve al dueño', () => {
+  const { room, a, b } = setup();
+  const card = playOne(room, a);
+  applyAction(room, a.id, { type: 'giveControl', iid: card.iid, to: b.id });
+  assert.equal(b.zones.battlefield.at(-1).iid, card.iid);
+  assert.throws(() => applyAction(room, a.id, { type: 'tap', iid: card.iid }), 'el dueño ya no la controla');
+  applyAction(room, b.id, { type: 'tap', iid: card.iid });
+  applyAction(room, b.id, { type: 'move', iid: card.iid, to: 'graveyard' });
+  assert.equal(a.zones.graveyard.at(-1).iid, card.iid, 'va al cementerio del dueño');
+  assert.equal(b.zones.graveyard.length, 0);
+});
+
+test('reiniciar devuelve las cartas cedidas y recupera las propias', () => {
+  const { room, a, b } = setup();
+  applyAction(room, b.id, { type: 'setDeck', cards: deck(20), commanders: [] });
+  const mine = playOne(room, a);
+  const theirs = playOne(room, b);
+  applyAction(room, a.id, { type: 'giveControl', iid: mine.iid, to: b.id });
+  applyAction(room, b.id, { type: 'giveControl', iid: theirs.iid, to: a.id });
+  applyAction(room, a.id, { type: 'reset' });
+  assert.equal(b.zones.battlefield.some((c) => c.iid === mine.iid), false);
+  assert.equal(b.zones.battlefield.some((c) => c.iid === theirs.iid), true);
+  assert.equal(a.zones.library.length, 99);
+});
+
+test('acciones sobre la zona de un rival quedan en el log', () => {
+  const { room, a, b } = setup();
+  applyAction(room, b.id, { type: 'setDeck', cards: deck(20), commanders: [] });
+  applyAction(room, a.id, { type: 'targetZone', target: b.id, op: 'mill', n: 2 });
+  assert.equal(b.zones.graveyard.length, 2);
+  applyAction(room, a.id, { type: 'targetZone', target: b.id, op: 'exileTop', n: 1 });
+  assert.equal(b.zones.exile.length, 1);
+  applyAction(room, b.id, { type: 'draw', n: 3 });
+  applyAction(room, a.id, { type: 'targetZone', target: b.id, op: 'discardRandom' });
+  assert.equal(b.zones.hand.length, 2);
+  assert.match(room.log.at(-1).text, /descarte al azar/);
+  const req = applyAction(room, a.id, { type: 'targetZone', target: b.id, op: 'requestHand' });
+  assert.equal(req.event.target, b.id);
+  const rev = applyAction(room, a.id, { type: 'targetZone', target: b.id, op: 'revealTop', n: 2 });
+  assert.equal(rev.event.cards.length, 2);
+});
+
+test('modo solitario: asientos controlados por el anfitrión', () => {
+  const room = createRoom('SOLO01', { solo: true });
+  const host = addPlayer(room, 'Ale');
+  applyAction(room, host.id, { type: 'setDeck', cards: deck(99), commanders: [{ name: 'Tymna' }] });
+  applyAction(room, host.id, { type: 'addSeat', name: 'Rival 1', copyDeck: true });
+  const seat = room.players[1];
+  assert.equal(seat.controlledBy, host.id);
+  assert.equal(seat.zones.library.length, 99);
+  applyAction(room, host.id, { type: 'draw', n: 7, seat: seat.id });
+  assert.equal(seat.zones.hand.length, 7);
+  assert.equal(host.zones.hand.length, 0);
+  const view = viewFor(room, host.id).players.find((p) => p.id === seat.id);
+  assert.equal(view.zones.hand.length, 7, 'el anfitrión ve la mano de sus asientos');
+  const other = createRoom('X', {});
+  const intruder = addPlayer(room, 'otro');
+  assert.throws(() => applyAction(room, intruder.id, { type: 'draw', seat: seat.id }), /No controlas/);
+  assert.throws(() => applyAction(other, addPlayer(other, 'z').id, { type: 'addSeat' }), /solitario/);
+  applyAction(room, host.id, { type: 'removeSeat', target: seat.id });
+  assert.equal(room.players.includes(seat), false);
+});

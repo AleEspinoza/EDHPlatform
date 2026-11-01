@@ -615,7 +615,7 @@ function renderPanel(p) {
   }, h('span', {}, myTurn ? 'Pasar turno' : 'Turno rival')) : null;
 
   return h('div', { class: `panel${isMe ? ' mine' : ' opp'}${state.activePlayerId === p.id ? ' active' : ''}${focusPid === p.id ? ' focused' : ''}`, style: { '--pc': p.color }, dataset: { pid: p.id } },
-    h('div', { class: `mat${p.mat ? ` custom ${p.mat.kind}` : ''}`, style: matStyle(p.mat) }, renderBattlefield(p, mine)),
+    h('div', { class: `mat${p.mat ? ` custom ${p.mat.kind}` : ''}`, style: matStyle(p.mat) }, matLayers(p.mat), renderBattlefield(p, mine)),
     endTurn,
     h('div', { class: 'rail' },
       hero,
@@ -629,6 +629,15 @@ const MAT_COLORS = [
   ['Gris claro', '#CBD6E2'], ['Verde', '#4FB06D'], ['Azul marino', '#1260B0'], ['Rosa', '#EBB8DD'], ['Índigo', '#5C62D6'],
   ['Blanco', '#FFFFFF'], ['Magenta', '#BE398D'], ['Dorado', '#D49137'], ['Menta', '#CAE7D3'], ['Rojo oscuro', '#BF2C34'],
 ];
+// Tapetes animados: cuatro manchas de luz difusas que flotan y se mezclan (puro CSS).
+const ANIM_MATS = [
+  ['lava-atardecer', 'Atardecer en movimiento'], ['lava-oceano', 'Océano en movimiento'], ['lava-bosque', 'Bosque en movimiento'],
+  ['lava-neon', 'Neón en movimiento'], ['lava-magma', 'Magma'], ['lava-aurora', 'Aurora'],
+];
+function matLayers(mat) {
+  if (mat?.kind !== 'anim') return null;
+  return h('div', { class: `lava ${mat.value}`, 'aria-hidden': 'true' }, h('i'), h('i'), h('i'), h('i'), h('u'), h('u'), h('b'));
+}
 function matStyle(mat) {
   if (mat?.kind === 'color') return { background: `radial-gradient(120% 100% at 50% 40%, rgba(255,255,255,.12), transparent 60%), radial-gradient(140% 120% at 50% 50%, transparent 55%, rgba(0,0,0,.35)), ${mat.value}` };
   if (mat?.kind === 'image') return { background: `url("/assets/${mat.value}") center / cover no-repeat` };
@@ -649,6 +658,10 @@ function renderMatPicker() {
     style: m ? { backgroundImage: `url("/assets/${m.value}")` } : { backgroundImage: asset('mats/tavern') ? `url("${asset('mats/tavern')}")` : '' },
     onclick: () => chooseMat(m),
   }, h('span', {}, m ? matName(m.value) : 'Taberna'))));
+  $('#mat-anims').replaceChildren(...ANIM_MATS.map(([value, name]) => {
+    const m = { kind: 'anim', value };
+    return h('button', { class: `mat-option anim${same(m) ? ' on' : ''}`, title: name, onclick: () => chooseMat(m) }, matLayers(m), h('span', {}, name));
+  }));
   $('#mat-colors').replaceChildren(...MAT_COLORS.map(([name, hex]) => {
     const m = { kind: 'color', value: hex.toLowerCase() };
     return h('button', { class: `mat-option swatch${same(m) ? ' on' : ''}`, title: `${name} ${hex}`, style: { background: hex }, onclick: () => chooseMat(m) }, h('span', {}, name));

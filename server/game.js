@@ -163,10 +163,13 @@ function findOnAnyBattlefield(room, iid) {
   return hit;
 }
 
-/** Tapete: un color #rrggbb o una imagen dentro de assets/mats. */
+export const ANIM_MATS = new Set(['lava-atardecer', 'lava-oceano', 'lava-bosque', 'lava-neon', 'lava-magma', 'lava-aurora']);
+
+/** Tapete: un color #rrggbb, una imagen dentro de assets/mats o un tapete animado. */
 export function sanitizeMat(mat) {
   if (!mat || typeof mat !== 'object') return null;
   if (mat.kind === 'color' && /^#[0-9a-f]{6}$/i.test(mat.value)) return { kind: 'color', value: mat.value.toLowerCase() };
+  if (mat.kind === 'anim' && ANIM_MATS.has(mat.value)) return { kind: 'anim', value: mat.value };
   if (mat.kind === 'image' && /^mats\/[\w.-]{1,80}\.(webp|png|jpe?g)$/i.test(mat.value) && !mat.value.includes('..')) return { kind: 'image', value: mat.value };
   throw new GameError('Tapete inválido');
 }

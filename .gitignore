@@ -1,3 +1,6 @@
 node_modules/
 .DS_Store
 data/
+
+# Imágenes de prueba sin licencia clara: solo locales, nunca al repo público
+public/assets/mats/prueba-*

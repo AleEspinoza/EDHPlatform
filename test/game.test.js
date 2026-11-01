@@ -389,6 +389,9 @@ test('tapetes: color o imagen de assets/mats, visibles para todos', () => {
   assert.equal(a.mat.value, 'mats/forest.webp');
   assert.throws(() => applyAction(room, a.id, { type: 'setMat', mat: { kind: 'image', value: '../../server/db.js' } }), /inválido/);
   assert.throws(() => applyAction(room, a.id, { type: 'setMat', mat: { kind: 'color', value: 'red;background:url(x)' } }), /inválido/);
+  applyAction(room, a.id, { type: 'setMat', mat: { kind: 'anim', value: 'lava-neon' } });
+  assert.equal(a.mat.kind, 'anim');
+  assert.throws(() => applyAction(room, a.id, { type: 'setMat', mat: { kind: 'anim', value: 'otra' } }), /inválido/);
   applyAction(room, a.id, { type: 'setMat', mat: null });
   assert.equal(a.mat, null);
 });

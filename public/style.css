@@ -648,3 +648,51 @@ html.has-mats-tavern .mat.custom .battlefield { margin: 1.2%; }
 /* Las zonas no tapan el tapete con un rectángulo: solo el marco */
 .panel .zones { background: none; }
 html.has-zones-frame .pile { background: rgba(10,6,3,.5); }
+
+/* ---------- Tapetes animados «lámpara de lava» ----------
+   Cuatro manchas (radial-gradient, sin filtros: baratas de animar) que flotan con
+   transform en ciclos largos y desfasados, más un velo de brillo que respira. */
+.mat.anim { background: var(--lava-bg); }
+.lava { position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: inherit; background: var(--lava-bg); }
+.lava i {
+  position: absolute; width: 70%; aspect-ratio: 1; border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, var(--c) 0%, color-mix(in srgb, var(--c) 55%, transparent) 30%, transparent 68%);
+  mix-blend-mode: screen; opacity: .85; will-change: transform;
+}
+.lava i:nth-child(1) { --c: var(--l1); left: -15%; top: -30%; animation: lava-a 38s ease-in-out infinite alternate; }
+.lava i:nth-child(2) { --c: var(--l2); right: -20%; top: 10%; animation: lava-b 46s ease-in-out infinite alternate; }
+.lava i:nth-child(3) { --c: var(--l3); left: 20%; bottom: -45%; animation: lava-c 52s ease-in-out infinite alternate; }
+.lava i:nth-child(4) { --c: var(--l4); left: 45%; top: -20%; width: 45%; animation: lava-d 31s ease-in-out infinite alternate; }
+.lava b { position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 50%, transparent 40%, rgba(0,0,0,.35)); animation: lava-breathe 14s ease-in-out infinite alternate; }
+@keyframes lava-a { 0% { transform: translate(0, 0) scale(1); } 50% { transform: translate(55%, 35%) scale(1.25); } 100% { transform: translate(20%, 70%) scale(.9); } }
+@keyframes lava-b { 0% { transform: translate(0, 0) scale(1.1); } 50% { transform: translate(-60%, 25%) scale(.85); } 100% { transform: translate(-30%, -35%) scale(1.2); } }
+@keyframes lava-c { 0% { transform: translate(0, 0) scale(.95); } 50% { transform: translate(40%, -55%) scale(1.3); } 100% { transform: translate(-35%, -30%) scale(1); } }
+@keyframes lava-d { 0% { transform: translate(0, 0) scale(1); } 50% { transform: translate(-70%, 90%) scale(1.4); } 100% { transform: translate(-20%, 40%) scale(.8); } }
+@keyframes lava-breathe { from { opacity: .75; } to { opacity: 1; } }
+.lava-atardecer { --lava-bg: linear-gradient(160deg, #3a1250, #8a2a5e 55%, #2a0f3a); --l1: #ff9a3c; --l2: #ff4f8b; --l3: #b46bff; --l4: #ffd36b; }
+.lava-oceano    { --lava-bg: linear-gradient(160deg, #061a3d, #0c3d6e 55%, #041a33); --l1: #2fd6ff; --l2: #2f6bff; --l3: #6effd8; --l4: #a3c8ff; }
+.lava-bosque    { --lava-bg: linear-gradient(160deg, #06201a, #12402f 55%, #051812); --l1: #6dff9a; --l2: #e8ff7a; --l3: #2fb8c9; --l4: #b6ffcf; }
+.lava-neon      { --lava-bg: linear-gradient(160deg, #0b0520, #26104f 55%, #3a0c4a); --l1: #ff2fc0; --l2: #3f8cff; --l3: #9b4dff; --l4: #ff6ae0; }
+.lava-magma     { --lava-bg: linear-gradient(160deg, #1a0503, #4a0f06 55%, #160402); --l1: #ff5a1f; --l2: #ffb020; --l3: #d4141c; --l4: #ffd86b; }
+.lava-aurora    { --lava-bg: linear-gradient(170deg, #050a1f, #0d2340 60%, #071a2a); --l1: #39ffb0; --l2: #3fd0ff; --l3: #a46bff; --l4: #b8ff6b; }
+.mat.anim .battlefield { position: relative; z-index: 1; }
+.mat-option.anim { background: #111; }
+.mat-option.anim .lava i { animation-duration: 9s, 11s; }
+.mat-option.anim span { position: relative; z-index: 1; }
+@media (prefers-reduced-motion: reduce) { .lava i, .lava b { animation: none !important; } }
+
+/* Bokeh: círculos de luz que suben despacio (dos capas a distinta velocidad = profundidad) */
+.lava u {
+  position: absolute; inset: -40% 0 0; pointer-events: none; mix-blend-mode: screen; will-change: transform;
+  background:
+    radial-gradient(circle, color-mix(in srgb, var(--l1) 75%, transparent) 0 14%, color-mix(in srgb, var(--l1) 25%, transparent) 20%, transparent 24%) 0 0 / 310px 290px,
+    radial-gradient(circle, color-mix(in srgb, var(--l2) 70%, transparent) 0 10%, color-mix(in srgb, var(--l2) 20%, transparent) 16%, transparent 19%) 120px 170px / 430px 370px,
+    radial-gradient(circle, color-mix(in srgb, var(--l4) 65%, transparent) 0 8%, color-mix(in srgb, var(--l4) 18%, transparent) 13%, transparent 16%) 230px 60px / 530px 470px;
+  opacity: .3; animation: bokeh-rise 70s linear infinite;
+}
+.lava u + u { opacity: .16; transform: scale(1.8); animation-duration: 110s; animation-direction: reverse; background-position: 40px 80px, 160px 10px, 20px 200px; }
+@keyframes bokeh-rise { from { transform: translateY(0); } to { transform: translateY(-30%); } }
+.lava u + u { animation-name: bokeh-rise-big; }
+@keyframes bokeh-rise-big { from { transform: scale(1.8) translateY(0); } to { transform: scale(1.8) translateY(-18%); } }
+.mat-option.anim .lava u { animation-duration: 20s; }
+@media (prefers-reduced-motion: reduce) { .lava u { animation: none !important; } }

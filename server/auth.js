@@ -44,11 +44,28 @@ export function createAuth(db) {
     insertUser: db.prepare('INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)'),
     userByName: db.prepare('SELECT * FROM users WHERE username = ?'),
     insertSession: db.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'),
-    sessionUser: db.prepare(`SELECT u.id, u.username FROM sessions s JOIN users u ON u.id = s.user_id
+    sessionUser: db.prepare(`SELECT u.id, u.username, u.display_name, u.avatar_url FROM sessions s JOIN users u ON u.id = s.user_id
                              WHERE s.token_hash = ? AND s.expires_at > ?`),
     deleteSession: db.prepare('DELETE FROM sessions WHERE token_hash = ?'),
     purgeSessions: db.prepare('DELETE FROM sessions WHERE expires_at <= ?'),
+    userByGoogle: db.prepare('SELECT * FROM users WHERE google_sub = ?'),
+    insertGoogleUser: db.prepare(`INSERT INTO users (username, password_hash, created_at, email, google_sub, avatar_url, display_name)
+                                  VALUES (?, '', ?, ?, ?, ?, ?)`),
+    updateGoogleProfile: db.prepare('UPDATE users SET email = ?, avatar_url = ?, display_name = COALESCE(display_name, ?) WHERE id = ?'),
   };
+  const publicUser = (row) => ({ id: row.id, username: row.username, displayName: row.display_name || row.username, avatar: row.avatar_url || null });
+
+  /** Nombre de usuario único a partir del nombre o correo de Google. */
+  function freeUsername(profile) {
+    const base = (profile.name || profile.email?.split('@')[0] || 'jugador')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 16) || 'jugador';
+    const seed = base.length >= 3 ? base : `${base}_mtg`;
+    for (let i = 0; i < 1000; i++) {
+      const candidate = i === 0 ? seed : `${seed.slice(0, 16)}${i + 1}`;
+      if (!q.userByName.get(candidate)) return candidate;
+    }
+    return `jugador_${randomBytes(4).toString('hex')}`;
+  }
 
   // Límite simple de intentos de login por IP + usuario (en memoria).
   const attempts = new Map();
@@ -74,25 +91,39 @@ export function createAuth(db) {
       validateCredentials(username, password);
       if (q.userByName.get(username)) throw new AuthError('Ese nombre de usuario ya existe', 409);
       const { lastInsertRowid } = q.insertUser.run(username, hashPassword(password), Date.now());
-      const user = { id: Number(lastInsertRowid), username };
+      const user = { id: Number(lastInsertRowid), username, displayName: username, avatar: null };
       return { user, token: startSession(user.id) };
     },
     login(username, password, ip = '') {
       const entry = checkRate(`${ip}|${String(username).toLowerCase()}`);
       const row = typeof username === 'string' ? q.userByName.get(username) : null;
       // Se verifica igual aunque no exista el usuario, para no revelar cuáles existen por tiempo.
-      const ok = verifyPassword(String(password ?? ''), row?.password_hash ?? DUMMY_HASH) && row;
+      const ok = verifyPassword(String(password ?? ''), row?.password_hash || DUMMY_HASH) && row?.password_hash && row;
       if (!ok) {
         entry.count++;
         throw new AuthError('Usuario o contraseña incorrectos', 401);
       }
       attempts.delete(`${ip}|${String(username).toLowerCase()}`);
-      return { user: { id: row.id, username: row.username }, token: startSession(row.id) };
+      return { user: publicUser(row), token: startSession(row.id) };
     },
     userFromToken(token) {
       if (!token) return null;
       const row = q.sessionUser.get(sha256(token), Date.now());
-      return row ? { id: row.id, username: row.username } : null;
+      return row ? publicUser(row) : null;
+    },
+    /** Entra (o crea la cuenta) con un perfil ya verificado de Google. */
+    googleLogin(profile) {
+      let row = q.userByGoogle.get(profile.sub);
+      if (row) {
+        q.updateGoogleProfile.run(profile.email, profile.picture, profile.name, row.id);
+        row = q.userByGoogle.get(profile.sub);
+      } else {
+        const username = freeUsername(profile);
+        const { lastInsertRowid } = q.insertGoogleUser.run(username, Date.now(), profile.email, profile.sub, profile.picture, profile.name || username);
+        row = q.userByName.get(username);
+        if (Number(lastInsertRowid) !== row.id) throw new AuthError('No se pudo crear la cuenta', 500);
+      }
+      return { user: publicUser(row), token: startSession(row.id) };
     },
     logout(token) {
       if (token) q.deleteSession.run(sha256(token));

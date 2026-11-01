@@ -4,7 +4,9 @@ import { once } from 'node:events';
 import { io as connect } from 'socket.io-client';
 import { httpServer } from '../server/index.js';
 import { parseMoxfieldUrl, moxfieldToText, importMoxfield } from '../server/moxfield.js';
-import { hashPassword, verifyPassword } from '../server/auth.js';
+import { hashPassword, verifyPassword, createAuth } from '../server/auth.js';
+import { createGoogleFlow, verifyIdTokenClaims } from '../server/google.js';
+import { openDb } from '../server/db.js';
 
 let base;
 before(async () => {
@@ -149,4 +151,52 @@ test('Moxfield: apagado sin autorización y usa el User-Agent cuando existe', as
   assert.equal(deck.listText, '1 Sol Ring');
   const res = await fetch(`${base}/api/import/moxfield?url=https://moxfield.com/decks/AbC123`);
   assert.equal(res.status, 501, 'el endpoint está apagado sin MOXFIELD_USER_AGENT');
+});
+
+// ---------- Google ----------
+const CLIENT = 'cliente-123.apps.googleusercontent.com';
+const jwt = (claims) => `h.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.firma`;
+const goodClaims = () => ({ iss: 'https://accounts.google.com', aud: CLIENT, sub: '1098765', email: 'ale@gmail.com', email_verified: true, name: 'Alejandro Pérez', picture: 'https://lh3.googleusercontent.com/x', exp: Math.floor(Date.now() / 1000) + 600 });
+
+test('Google: la URL lleva PKCE y state; el canje valida state, cookie y token', async () => {
+  let sent;
+  const fakeFetch = async (url, opts) => { sent = { url, body: new URLSearchParams(opts.body.toString()) }; return { ok: true, json: async () => ({ id_token: jwt(goodClaims()) }) }; };
+  const flow = createGoogleFlow({ clientId: CLIENT, clientSecret: 'secreto' }, { fetchImpl: fakeFetch });
+  const { url, state } = flow.start('http://localhost:3000/api/auth/google/callback');
+  const u = new URL(url);
+  assert.equal(u.hostname, 'accounts.google.com');
+  assert.equal(u.searchParams.get('code_challenge_method'), 'S256');
+  assert.equal(u.searchParams.get('state'), state);
+  await assert.rejects(flow.finish({ code: 'c', state, cookieState: 'otro' }), /no coincide/);
+  const { state: s2 } = flow.start('http://localhost:3000/api/auth/google/callback');
+  const profile = await flow.finish({ code: 'codigo', state: s2, cookieState: s2 });
+  assert.equal(profile.sub, '1098765');
+  assert.equal(sent.url, 'https://oauth2.googleapis.com/token');
+  assert.ok(sent.body.get('code_verifier').length > 40);
+  await assert.rejects(flow.finish({ code: 'codigo', state: s2, cookieState: s2 }), /expiró/, 'un state no se reutiliza');
+});
+
+test('Google: se rechazan tokens de otra app, vencidos o sin verificar', () => {
+  assert.throws(() => verifyIdTokenClaims(jwt({ ...goodClaims(), aud: 'otra' }), CLIENT), /no es para esta/);
+  assert.throws(() => verifyIdTokenClaims(jwt({ ...goodClaims(), exp: 1 }), CLIENT), /expiró/);
+  assert.throws(() => verifyIdTokenClaims(jwt({ ...goodClaims(), iss: 'https://malo.com' }), CLIENT), /Emisor/);
+  assert.throws(() => verifyIdTokenClaims(jwt({ ...goodClaims(), email_verified: false }), CLIENT), /verificado/);
+});
+
+test('Google: crea la cuenta una vez y la reutiliza; no permite login con contraseña', () => {
+  const auth = createAuth(openDb(':memory:'));
+  const first = auth.googleLogin({ sub: 'g1', email: 'ale@gmail.com', name: 'Alejandro Pérez', picture: null });
+  assert.equal(first.user.username, 'Alejandro_Perez');
+  assert.equal(first.user.displayName, 'Alejandro Pérez');
+  const again = auth.googleLogin({ sub: 'g1', email: 'ale@gmail.com', name: 'Alejandro Pérez', picture: null });
+  assert.equal(again.user.id, first.user.id);
+  const other = auth.googleLogin({ sub: 'g2', email: 'x@gmail.com', name: 'Alejandro Pérez', picture: null });
+  assert.equal(other.user.username, 'Alejandro_Perez2', 'nombre único');
+  assert.throws(() => auth.login('Alejandro_Perez', ''), /incorrectos/);
+  assert.equal(auth.userFromToken(first.token).id, first.user.id);
+});
+
+test('Google: sin configurar, el botón responde 501 y providers lo indica', async () => {
+  assert.equal((await fetch(`${base}/api/auth/providers`).then((r) => r.json())).google, false);
+  assert.equal((await fetch(`${base}/api/auth/google`, { redirect: 'manual' })).status, 501);
 });

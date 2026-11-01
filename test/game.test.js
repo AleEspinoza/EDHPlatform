@@ -109,38 +109,82 @@ test('peek devuelve el tope primero', () => {
   assert.equal(res.private.cards[0].iid, top.iid);
 });
 
-test('partida por sockets: crear sala, unirse, reconectar', async () => {
+test('partida por sockets: exige cuenta, crear sala, unirse, reconectar, terminar y guardar historial', async () => {
   httpServer.listen(0);
   await once(httpServer, 'listening');
   const url = `http://localhost:${httpServer.address().port}`;
   const emit = (s, ev, data) => new Promise((r) => s.emit(ev, data, r));
-  const s1 = connect(url, { transports: ['websocket'] });
-  const s2 = connect(url, { transports: ['websocket'] });
+  const account = async (username) => {
+    const res = await fetch(`${url}/api/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password: 'clave-de-prueba' }) });
+    return res.headers.get('set-cookie').split(';')[0];
+  };
+  const cookieA = await account('ale_sock');
+  const cookieB = await account('rival_sock');
+  const anon = connect(url, { transports: ['websocket'] });
+  const s1 = connect(url, { transports: ['websocket'], extraHeaders: { Cookie: cookieA } });
+  const s2 = connect(url, { transports: ['websocket'], extraHeaders: { Cookie: cookieB } });
   try {
-    const created = await emit(s1, 'createRoom', { name: 'Ale' });
+    const denied = await emit(anon, 'createRoom', {});
+    assert.equal(denied.code, 'login', 'sin cuenta no se puede jugar');
+
+    const created = await emit(s1, 'createRoom', {});
     assert.equal(created.ok, true);
     assert.match(created.code, /^[A-Z2-9]{6}$/);
-    const joined = await emit(s2, 'joinRoom', { code: created.code.toLowerCase(), name: 'Rival' });
+    const joined = await emit(s2, 'joinRoom', { code: created.code.toLowerCase() });
     assert.equal(joined.ok, true);
 
     const stateP = once(s2, 'state');
-    await emit(s1, 'action', { type: 'setDeck', cards: deck(10), commanders: [] });
+    await emit(s1, 'action', { type: 'setDeck', cards: deck(10), commanders: [{ name: 'Tymna' }] });
     const [state] = await stateP;
-    assert.equal(state.players.length, 2);
+    assert.deepEqual(state.players.map((p) => p.name), ['ale_sock', 'rival_sock']);
+    await emit(s2, 'action', { type: 'setDeck', cards: deck(10), commanders: [{ name: "K'rrik" }] });
 
-    const bad = await emit(s2, 'joinRoom', { code: 'ZZZZZZ', name: 'x' });
+    const bad = await emit(s2, 'joinRoom', { code: 'ZZZZZZ' });
     assert.equal(bad.ok, false);
 
     s1.disconnect();
-    const s3 = connect(url, { transports: ['websocket'] });
-    const back = await emit(s3, 'joinRoom', { code: created.code, token: created.token });
-    assert.equal(back.playerId, created.playerId, 'reconecta al mismo asiento');
+    const s3 = connect(url, { transports: ['websocket'], extraHeaders: { Cookie: cookieA } });
+    const back = await emit(s3, 'joinRoom', { code: created.code });
+    assert.equal(back.playerId, created.playerId, 'la cuenta vuelve a su mismo asiento');
+
+    // Dos turnos y gana el rival
+    await emit(s3, 'action', { type: 'passTurn' });
+    await emit(s3, 'action', { type: 'passTurn' });
+    const over = once(s3, 'event');
+    const end = await emit(s3, 'action', { type: 'endGame', winner: joined.playerId, rematch: true });
+    assert.equal(end.ok, true);
+    const [ev] = await over;
+    assert.equal(ev.winner, 'rival_sock');
+
+    const games = await (await fetch(`${url}/api/games`, { headers: { Cookie: cookieA } })).json();
+    assert.equal(games.games.length, 1);
+    assert.equal(games.games[0].result, 'loss');
+    assert.equal(games.games[0].turns, 2);
+    assert.equal(games.games[0].myCommanders, 'Tymna');
+    const stats = await (await fetch(`${url}/api/stats`, { headers: { Cookie: cookieB } })).json();
+    assert.equal(stats.stats.wins, 1);
+    assert.equal(stats.stats.winRate, 1);
+    assert.equal(stats.stats.byCommander[0].commanders, "K'rrik");
     s3.disconnect();
   } finally {
+    anon.disconnect();
     s1.disconnect();
     s2.disconnect();
     httpServer.close();
   }
+});
+
+test('fin de partida: empate, revancha y resumen', () => {
+  const { room, a, b } = setup();
+  applyAction(room, b.id, { type: 'setDeck', cards: deck(20), commanders: [] });
+  applyAction(room, a.id, { type: 'passTurn' });
+  applyAction(room, a.id, { type: 'draw', n: 5 });
+  const res = applyAction(room, a.id, { type: 'endGame', rematch: true });
+  assert.equal(res.record.result, 'draw');
+  assert.equal(res.record.players.length, 2);
+  assert.equal(room.turn, 0);
+  assert.equal(a.zones.hand.length, 0, 'la revancha rebaraja');
+  assert.equal(a.zones.library.length, 99);
 });
 
 test('el log no filtra el nombre de una carta jugada boca abajo', () => {

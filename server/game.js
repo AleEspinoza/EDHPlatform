@@ -80,10 +80,10 @@ function resetCardState(card) {
 }
 
 export function createRoom(code, { solo = false } = {}) {
-  return { code, solo, hostId: null, createdAt: Date.now(), lastActive: Date.now(), players: [], log: [], activePlayerId: null, turn: 0 };
+  return { code, solo, hostId: null, createdAt: Date.now(), lastActive: Date.now(), players: [], log: [], activePlayerId: null, turn: 0, gameStartedAt: null };
 }
 
-export function addPlayer(room, name, { controlledBy = null } = {}) {
+export function addPlayer(room, name, { controlledBy = null, userId = null } = {}) {
   if (room.players.length >= MAX_PLAYERS) throw new GameError('La sala está llena');
   const used = new Set(room.players.map((p) => p.color));
   const player = {
@@ -98,6 +98,7 @@ export function addPlayer(room, name, { controlledBy = null } = {}) {
     deck: null, // lista original para reiniciar
     connected: true,
     controlledBy, // asiento extra del modo solitario, manejado por este jugador
+    userId, // cuenta dueña del asiento (para el historial)
   };
   room.players.push(player);
   if (!room.activePlayerId) room.activePlayerId = player.id;
@@ -476,8 +477,27 @@ export function applyAction(room, playerId, action) {
       const next = room.players[(idx + 1) % room.players.length];
       room.activePlayerId = next.id;
       room.turn += 1;
+      room.gameStartedAt ??= Date.now();
       log(room, `Turno ${room.turn}: ${next.name}`);
       return {};
+    }
+    case 'endGame': {
+      const winner = a.winner ? getPlayer(room, str(a.winner, 64)) : null;
+      const record = gameRecord(room, winner ? 'win' : 'draw', winner);
+      log(room, winner ? `🏆 ${winner.name} gana la partida (turno ${room.turn})` : `La partida termina en empate (turno ${room.turn})`, 'announce');
+      room.turn = 0;
+      room.gameStartedAt = null;
+      if (a.rematch) {
+        for (const pl of room.players) {
+          if (!pl.deck) continue;
+          setupDeck(room, pl);
+          pl.life = STARTING_LIFE;
+          pl.poison = 0;
+          pl.cmdDamage = {};
+        }
+        log(room, 'Revancha: todos los mazos se barajan de nuevo');
+      }
+      return { record, event: { kind: 'gameOver', winner: winner?.name ?? null, color: winner?.color ?? null, by: p.name } };
     }
     case 'reset': {
       if (!p.deck) throw new GameError('No hay mazo cargado');
@@ -497,6 +517,34 @@ export function applyAction(room, playerId, action) {
     default:
       throw new GameError(`Acción desconocida: ${a.type}`);
   }
+}
+
+// ---------- Historial ----------
+/** Resumen de la partida para guardar en el historial de cada cuenta. */
+export function gameRecord(room, result, winner = null) {
+  const humans = room.players.filter((pl) => !pl.controlledBy);
+  return {
+    roomCode: room.code,
+    solo: room.solo,
+    startedAt: room.gameStartedAt ?? room.createdAt,
+    endedAt: Date.now(),
+    turns: room.turn,
+    result,
+    winnerName: winner?.name ?? null,
+    players: humans.map((pl, seat) => ({
+      userId: pl.userId,
+      seat,
+      name: pl.name,
+      commanders: pl.deck?.commanders.map((c) => c.name).join(' + ') ?? '',
+      isWinner: winner?.id === pl.id,
+      life: pl.life,
+    })),
+  };
+}
+
+/** ¿Vale la pena guardar como «sin terminar» una partida al cerrarse la sala? */
+export function hasGameInProgress(room) {
+  return !room.solo && room.gameStartedAt !== null && room.players.filter((pl) => !pl.controlledBy && pl.deck).length >= 2;
 }
 
 // ---------- Acciones sobre zonas de otro jugador ----------
@@ -621,6 +669,7 @@ export function viewFor(room, viewerId) {
     code: room.code,
     activePlayerId: room.activePlayerId,
     turn: room.turn,
+    gameStartedAt: room.gameStartedAt,
     you: viewerId,
     solo: room.solo,
     hostId: room.hostId,

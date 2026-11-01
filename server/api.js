@@ -3,6 +3,9 @@ import express from 'express';
 import { AuthError, SESSION_COOKIE, parseCookies, sessionCookie, clearCookie } from './auth.js';
 import { sanitizeDeckCard } from './game.js';
 import { importMoxfield, ImportError } from './moxfield.js';
+import { GoogleAuthError } from './google.js';
+
+const OAUTH_COOKIE = 'edh_oauth';
 
 const MAX_DECKS_PER_USER = 100;
 const MAX_DECK_CARDS = 300;
@@ -40,7 +43,7 @@ function deckFromBody(body) {
 
 const deckSummary = (r) => ({ id: r.id, name: r.name, commanders: r.commander_names, cardCount: r.card_count, updatedAt: r.updated_at });
 
-export function createApi({ db, auth }) {
+export function createApi({ db, auth, history, google = null }) {
   const q = {
     list: db.prepare('SELECT id, name, commander_names, card_count, updated_at FROM decks WHERE user_id = ? ORDER BY updated_at DESC'),
     count: db.prepare('SELECT COUNT(*) AS n FROM decks WHERE user_id = ?'),
@@ -90,6 +93,41 @@ export function createApi({ db, auth }) {
     res.json({ ok: true });
   });
   router.get('/auth/me', (req, res) => res.json({ user: req.user }));
+  router.get('/auth/providers', (_req, res) => res.json({ google: Boolean(google), password: true }));
+
+  // ---- Google ----
+  const callbackUrl = (req) => `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+  router.get('/auth/google', (req, res) => {
+    if (!google) throw new ApiError('El inicio de sesión con Google no está configurado en este servidor', 501);
+    const { url, state } = google.start(callbackUrl(req));
+    res.append('Set-Cookie', `${OAUTH_COOKIE}=${state}; Path=/api/auth/google; HttpOnly; SameSite=Lax; Max-Age=600${secure(req) ? '; Secure' : ''}`);
+    res.redirect(302, url);
+  });
+  router.get('/auth/google/callback', async (req, res) => {
+    res.append('Set-Cookie', `${OAUTH_COOKIE}=; Path=/api/auth/google; HttpOnly; SameSite=Lax; Max-Age=0`);
+    try {
+      if (!google) throw new GoogleAuthError('El inicio de sesión con Google no está configurado');
+      if (req.query.error) throw new GoogleAuthError('Cancelaste el inicio de sesión con Google.');
+      const profile = await google.finish({
+        code: typeof req.query.code === 'string' ? req.query.code : null,
+        state: typeof req.query.state === 'string' ? req.query.state : null,
+        cookieState: parseCookies(req.get('cookie'))[OAUTH_COOKIE],
+      });
+      const { token } = auth.googleLogin(profile);
+      res.append('Set-Cookie', sessionCookie(token, { secure: secure(req) }));
+      res.redirect(302, '/');
+    } catch (err) {
+      if (!(err instanceof GoogleAuthError)) console.error(err);
+      const msg = err instanceof GoogleAuthError ? err.message : 'No se pudo iniciar sesión con Google';
+      res.redirect(302, `/?login_error=${encodeURIComponent(msg)}`);
+    }
+  });
+
+  // ---- Historial ----
+  router.get('/games', requireUser, (req, res) => {
+    res.json({ games: history.games(req.user.id, { limit: Number(req.query.limit) || 30, offset: Number(req.query.offset) || 0 }) });
+  });
+  router.get('/stats', requireUser, (req, res) => res.json({ stats: history.stats(req.user.id) }));
 
   // ---- Mazos ----
   router.get('/decks', requireUser, (req, res) => res.json({ decks: q.list.all(req.user.id).map(deckSummary) }));

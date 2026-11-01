@@ -1,10 +1,12 @@
 # EDH Platform
 
-Versión 0.4
+Versión 0.5
 
 Mesa virtual de Commander/EDH con salas privadas, mazos importados y todas las acciones del juego en tiempo real.
 
 ## Qué incluye
+
+- **Estilo «Mesa del Archivo»**: mano en abanico que se levanta al pasar el mouse, retratos con el arte del comandante, gema de vida, cartas que caen al campo al jugarse y banner de turno.
 
 - **Salas privadas** con código de 6 caracteres y enlace de invitación (`/?sala=CODIGO`), hasta 6 jugadores.
 - **Reconexión**: si recargas o se cae la conexión, vuelves a tu asiento con tus cartas.

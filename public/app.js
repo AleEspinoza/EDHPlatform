@@ -222,8 +222,16 @@ const cardImage = (c) => (c.faceDown ? null : c.transformed && c.backImage ? c.b
 const allBattlefield = () => state.players.flatMap((p) => p.zones.battlefield.map((card) => ({ card, pid: p.id })));
 
 // ---------- Render ----------
+const artCrop = (url) => (url ? url.replace('/normal/', '/art_crop/') : null);
+let seenOnField = null; // iids en el campo en el render anterior
+let lastActive = null;
 function render() {
   if (!state) return;
+  const fieldNow = new Set(state.players.flatMap((pl) => pl.zones.battlefield.map((c) => c.iid)));
+  const entering = seenOnField ? new Set([...fieldNow].filter((iid) => !seenOnField.has(iid))) : new Set();
+  seenOnField = fieldNow;
+  if (lastActive !== null && state.activePlayerId !== lastActive && state.turn > 0) turnBanner(playerById(state.activePlayerId));
+  lastActive = state.activePlayerId;
   $('#room-code').textContent = state.code;
   $('#btn-copy').classList.toggle('hidden', state.solo);
   $('#solo-chip').classList.toggle('hidden', !state.solo);
@@ -242,7 +250,18 @@ function render() {
   $('#me').replaceChildren(mine ? renderPanel(mine) : '');
   renderHand();
   renderLog();
+  for (const iid of entering) document.querySelector(`.battlefield .card[data-iid="${CSS.escape(iid)}"]`)?.classList.add('enter');
   if (zoneView && !zoneView.library) renderZoneModal();
+}
+addEventListener('resize', () => state && renderHand());
+
+function turnBanner(p) {
+  if (!p) return;
+  const mineTurn = isMine(p.id);
+  const el = h('div', { class: `turn-banner${mineTurn ? ' mine' : ''}`, style: { '--pc': p.color } },
+    h('span', { class: 'turn-title' }, mineTurn ? (p.id === state.you ? 'Tu turno' : `Turno de ${p.name}`) : `Turno de ${p.name}`),
+    h('span', { class: 'turn-sub' }, `Turno ${state.turn}`));
+  onStage(el, mineTurn ? 1900 : 1300);
 }
 
 function renderCard(c, { owner, zone, att = 0 }) {
@@ -364,7 +383,12 @@ function renderPanel(p) {
     onclick: (e) => opponentZoneMenu(e, p),
   }, `✋ ${p.counts.hand} · 📚 ${p.counts.library}`) : null;
 
+  const art = artCrop(p.commanderImages?.[0]);
+  const portrait = h('div', { class: `portrait${art ? '' : ' empty'}`, style: art ? { backgroundImage: `url("${art}")` } : {}, title: p.commanderNames.join(' + ') || p.name },
+    p.commanderImages?.[1] ? h('span', { class: 'partner', style: { backgroundImage: `url("${artCrop(p.commanderImages[1])}")` } }) : null);
+
   const head = h('div', { class: 'panel-head' },
+    portrait,
     h('span', { class: 'pname' },
       h('span', { class: `dot${p.connected ? '' : ' off'}`, title: p.connected ? 'Conectado' : 'Desconectado' }), p.name,
       isMe ? h('span', { class: 'muted small' }, '(tú)') : null,
@@ -373,7 +397,7 @@ function renderPanel(p) {
     h('span', { class: 'cmdnames' }, p.commanderNames.join(' + ')),
     isSeat && mine ? h('button', { class: 'btn small ghost', onclick: () => openDeckModal(p.id) }, 'Mazo') : null,
     handChip, poison, ...cmdStats,
-    h('span', { class: 'life' }, mine ? lifeBtn(-1, '−') : null, h('b', { title: 'Vida' }, p.life), mine ? lifeBtn(1, '+') : null),
+    h('span', { class: `life${p.life <= 10 ? ' low' : ''}` }, mine ? lifeBtn(-1, '−') : null, h('b', { title: 'Vida' }, p.life), mine ? lifeBtn(1, '+') : null),
   );
 
   const command = h('div', { class: 'pile cmd', dataset: { pile: 'command', owner: p.id, ...(mine ? { drop: 'command' } : {}) }, title: 'Zona de mando' });
@@ -387,6 +411,19 @@ function renderPanel(p) {
   );
 }
 
+/** Siguiente hueco libre del campo: tierras en la fila de abajo, el resto arriba. */
+function freeSpot(p, card) {
+  const isLand = /\bLand\b/.test(card.typeLine ?? '');
+  const taken = p.zones.battlefield.map((c) => [c.x, c.y]);
+  const rows = isLand ? [0.92, 0.62] : [0.08, 0.38, 0.62];
+  for (const y of rows) {
+    for (let x = 0.02; x <= 0.98; x += 0.1) {
+      if (!taken.some(([tx, ty]) => Math.abs(tx - x) < 0.07 && Math.abs(ty - y) < 0.2)) return { x, y };
+    }
+  }
+  return { x: 0.45 + Math.random() * 0.1, y: 0.4 };
+}
+
 function renderHand() {
   const seats = myPlayers();
   const p = playerById(handSeat) ?? me();
@@ -398,9 +435,19 @@ function renderHand() {
     style: { '--pc': s.color },
     onclick: () => { handSeat = s.id; renderHand(); },
   }, s.id === state.you ? 'Tú' : s.name)) : []));
-  $('#hand').replaceChildren(...hand.map((c) => {
+  const n = hand.length;
+  const width = $('#hand').clientWidth || 900;
+  const cw = 112;
+  const gap = n > 1 ? Math.min(cw * 0.78, (width - cw - 40) / (n - 1)) : 0;
+  $('#hand').replaceChildren(...hand.map((c, i) => {
     const el = renderCard(c, { owner: p.id, zone: 'hand' });
-    el.addEventListener('dblclick', () => act(p.id, { type: 'move', iid: c.iid, to: 'battlefield', x: 0.4 + Math.random() * 0.2, y: 0.55 }));
+    const off = i - (n - 1) / 2; // posición relativa al centro del abanico
+    el.style.setProperty('--off', off);
+    el.style.setProperty('--gap', `${gap}px`);
+    el.style.setProperty('--rot', `${off * Math.min(4, 22 / Math.max(n, 1))}deg`);
+    el.style.setProperty('--drop', `${Math.abs(off) ** 2 * Math.min(3.2, 26 / Math.max(n, 1))}px`);
+    el.style.zIndex = String(10 + i);
+    el.addEventListener('dblclick', () => act(p.id, { type: 'move', iid: c.iid, to: 'battlefield', ...freeSpot(p, c) }));
     return el;
   }));
 }

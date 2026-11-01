@@ -1,6 +1,6 @@
 {
   "name": "edhplatform",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Mesa virtual de Commander/EDH con salas privadas",
   "main": "server/index.js",
   "directories": {

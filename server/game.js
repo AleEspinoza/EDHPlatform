@@ -638,6 +638,7 @@ export function viewFor(room, viewerId) {
         controlledBy: p.controlledBy,
         hasDeck: Boolean(p.deck),
         commanderNames: p.deck?.commanders.map((c) => c.name) ?? [],
+        commanderImages: p.deck?.commanders.map((c) => c.image).filter(Boolean) ?? [],
         counts: Object.fromEntries(ZONES.map((z) => [z, p.zones[z].length])),
         zones: {
           hand: mine ? p.zones.hand : [],

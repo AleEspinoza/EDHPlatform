@@ -204,9 +204,15 @@ html:not(.has-mats-tavern) .mat::before {
 .battlefield .card { position: absolute; left: calc(var(--x) * (100% - var(--cw))); top: calc(var(--y) * (100% - var(--cw) * 1.397)); }
 .empty-hint { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(60,38,18,.75); font: 17px var(--display); pointer-events: none; text-shadow: 0 1px 0 rgba(255,255,255,.3); }
 
-.rail { position: relative; z-index: 3; display: flex; align-items: flex-end; gap: 12px; padding: 8px 6px 2px; }
+.rail {
+  position: absolute; left: 14px; right: 14px; bottom: 10px; z-index: 3;
+  display: flex; align-items: flex-end; gap: 12px; padding: 0; pointer-events: none;
+}
+.rail > * { pointer-events: auto; }
+.rail .rail-spacer { pointer-events: none; }
+.hero-info { background: linear-gradient(90deg, rgba(20,12,6,.82), rgba(20,12,6,.55) 80%, transparent); padding: 4px 14px 4px 8px; border-radius: 10px; }
 .rail-spacer { flex: 1; }
-.panel.opp .rail { padding-top: 6px; gap: 8px; }
+.panel.opp .rail { left: 10px; right: 10px; bottom: 8px; gap: 8px; }
 
 /* Héroe: retrato en arco con la gema de vida */
 .hero { display: flex; align-items: flex-end; gap: 10px; min-width: 0; }
@@ -351,6 +357,7 @@ html.has-zones-command .pile[data-pile=command]::after { background-image: var(-
 .opp .card { cursor: default; }
 .card.ghost { position: fixed !important; z-index: 1000; pointer-events: none; transition: none; transform: rotate(-4deg) scale(1.08); box-shadow: 0 0 0 3px var(--green), 0 26px 46px rgba(0,0,0,.7); }
 .card.dragging-src { opacity: .25; }
+#hand .hand-slot:has(.dragging-src) .card { transform: none; }
 .battlefield .card.enter { animation: card-land .42s cubic-bezier(.2,.9,.3,1.2); }
 .battlefield .card.tapped.enter { animation: none; }
 @keyframes card-land {
@@ -371,17 +378,24 @@ html.has-hand-tray #hand-wrap { border-top: 0; box-shadow: none; background-colo
 .hand-tabs button { font: 13px var(--display); color: #fff; text-shadow: var(--outline); background: rgba(0,0,0,.4); border: 2px solid var(--gold-lo); border-radius: 999px; padding: 0 10px; cursor: pointer; }
 .hand-tabs button.on { background: var(--pc, var(--gold)); }
 #hand { --cw: calc(112px * var(--scale)); position: absolute; inset: 0; overflow: visible; }
-#hand .card {
-  position: absolute; bottom: -50px; left: calc(50% - var(--cw) / 2 + var(--off) * var(--gap));
+#hand .hand-slot {
+  position: absolute; bottom: -50px; width: var(--cw); aspect-ratio: 63 / 88;
+  left: calc(50% - var(--cw) / 2 + var(--off) * var(--gap));
   transform-origin: 50% 120%; transform: translateY(var(--drop)) rotate(var(--rot));
+  transition: translate .18s ease;
+}
+#hand .hand-slot .card {
+  position: absolute; inset: 0; width: 100%; transform-origin: 50% 100%;
   box-shadow: 0 0 0 1px rgba(0,0,0,.7), -4px 0 12px rgba(0,0,0,.5);
 }
-#hand .card:hover {
-  z-index: 200 !important; transform: translateY(-100px) scale(1.6); transition-duration: .14s;
+/* El hueco no se mueve (sigue bajo el mouse); la carta sube, se endereza y crece */
+#hand .hand-slot:hover { z-index: 200 !important; }
+#hand .hand-slot:hover .card {
+  transform: translateY(-46px) rotate(calc(-1 * var(--rot))) scale(1.6); transition-duration: .14s;
   box-shadow: 0 0 0 3px var(--green), 0 0 34px rgba(91,227,90,.6), 0 26px 42px rgba(0,0,0,.6);
 }
-#hand .card:hover ~ .card { translate: 46px 0; }
-#hand .card:has(~ .card:hover) { translate: -46px 0; }
+#hand .hand-slot:hover ~ .hand-slot { translate: 46px 0; }
+#hand .hand-slot:has(~ .hand-slot:hover) { translate: -46px 0; }
 #hand:empty::after { content: 'Tu mano está vacía'; position: absolute; bottom: 40px; left: 0; right: 0; text-align: center; color: var(--parch-dim); font: 16px var(--display); }
 
 /* ---------- Lateral ---------- */
@@ -554,7 +568,7 @@ html.has-ui-d20 .die { border-radius: 0; box-shadow: none; background-color: tra
 
 /* ---------- Arte generado (cuando está presente) ---------- */
 /* Marco de zona: la abertura del marco coincide con la carta (medida sobre zones/frame.webp) */
-html.has-zones-frame .zones { gap: calc(var(--cw) * .82); padding: calc(var(--cw) * .5) calc(var(--cw) * .42) calc(var(--cw) * .5); }
+html.has-zones-frame .zones { gap: calc(var(--cw) * .82); padding: calc(var(--cw) * .45) calc(var(--cw) * .42) calc(var(--cw) * .3); }
 html.has-zones-frame .pile { background: rgba(10,6,3,.55); box-shadow: inset 0 4px 10px rgba(0,0,0,.7); border-radius: 2px; }
 html.has-zones-frame .pile::after { inset: -35.2% -37.3% -26.9% -37.8%; background-image: var(--a-zones-frame); }
 html.has-zones-frame .pile .pile-label { top: calc(108.8% - 10px); bottom: auto; background: none; border: 0; box-shadow: none; font-size: calc(var(--cw) * .15); }
@@ -588,7 +602,7 @@ html.has-ui-end-turn .end-turn.ready { color: var(--gold-hi); filter: drop-shado
 /* Bandeja: los extremos (faroles) a escala real; solo se estira el tramo central */
 html.has-hand-tray #hand-wrap { background: none; border-style: solid; border-width: 0; border-image: var(--a-hand-tray) 0 330 fill / 0 calc(136px * 330 / 430) stretch; }
 html.has-mats-tavern .mat { box-shadow: none; border-radius: 6px; background-size: 100% 100%; }
-html.has-mats-tavern .mat .battlefield { margin: 4.5% 5% 5.5%; }
+html.has-mats-tavern .mat .battlefield { margin: 2.2% 2.6%; }
 
 /* Las zonas de la franja usan su propio tamaño de carta, más chico que el del campo */
 .panel.mine .zones { --cw: calc(56px * var(--scale)); }
@@ -600,3 +614,12 @@ html.has-mats-tavern .mat .battlefield { margin: 4.5% 5% 5.5%; }
 /* En las zonas rivales (chicas) solo se muestra la cantidad */
 .panel.opp .pile .pile-label { font-size: 0 !important; gap: 0; }
 .panel.opp .pile .pile-label b { font-size: 11px; }
+
+/* Más mesa para ti: los rivales ocupan menos alto */
+#opponents { height: 31%; min-height: 170px; }
+#opponents.focus { height: 50%; }
+.counts[data-drop].drop-hover { outline: 3px solid var(--green); border-radius: 6px; }
+
+/* Pasar turno: al borde derecho del tapete, a media altura (como en Hearthstone) */
+.panel > .end-turn { position: absolute; right: -6px; top: 34%; transform: translateY(-50%); z-index: 4; }
+html.has-ui-end-turn .panel > .end-turn { width: 150px; height: 84px; font-size: 16px; }

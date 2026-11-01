@@ -338,7 +338,14 @@ test('fuerza/resistencia, contadores en bloque, fases, maná, flechas, reaccione
   applyAction(room, a.id, { type: 'mana', color: 'U', delta: 2 });
   assert.equal(a.mana.U, 2);
   applyAction(room, a.id, { type: 'arrow', from: y.iid, to: b.id });
-  assert.equal(room.arrows.length, 1);
+  applyAction(room, a.id, { type: 'arrow', from: y.iid, to: { kind: 'zone', pid: b.id, zone: 'graveyard' } });
+  applyAction(room, a.id, { type: 'arrow', from: y.iid, to: { kind: 'point', pid: b.id, x: 0.3, y: 0.7 } });
+  applyAction(room, a.id, { type: 'arrow', from: y.iid, to: { kind: 'zone', pid: b.id, zone: 'hand' } });
+  assert.equal(room.arrows.length, 4);
+  assert.deepEqual(room.arrows[0].to, { kind: 'player', pid: b.id });
+  assert.throws(() => applyAction(room, a.id, { type: 'arrow', from: y.iid, to: { kind: 'zone', pid: b.id, zone: 'bolsillo' } }), /Zona/);
+  applyAction(room, a.id, { type: 'draw', n: 1 });
+  assert.throws(() => applyAction(room, a.id, { type: 'arrow', from: a.zones.hand.at(-1).iid, to: b.id }), /vista/, 'no desde la mano');
   applyAction(room, a.id, { type: 'passTurn' });
   assert.equal(room.phase, 0);
   assert.equal(room.arrows.length, 0, 'las flechas se borran al pasar el turno');
@@ -348,4 +355,28 @@ test('fuerza/resistencia, contadores en bloque, fases, maná, flechas, reaccione
   const bottom = a.zones.library[0];
   const res = applyAction(room, a.id, { type: 'peek', n: 2, from: 'bottom' });
   assert.equal(res.private.cards[0].iid, bottom.iid);
+});
+
+test('enviar mis cartas a las zonas de otro jugador', () => {
+  const { room, a, b } = setup();
+  applyAction(room, b.id, { type: 'setDeck', cards: deck(20), commanders: [] });
+  applyAction(room, a.id, { type: 'draw', n: 3 });
+  const [c1, c2, c3] = a.zones.hand;
+  applyAction(room, a.id, { type: 'move', iid: c1.iid, to: 'battlefield', toPlayer: b.id, x: 0.2, y: 0.3 });
+  const onB = b.zones.battlefield.find((c) => c.iid === c1.iid);
+  assert.ok(onB, 'queda en el campo del rival');
+  assert.deepEqual([onB.x, onB.y], [0.2, 0.3]);
+  assert.match(room.log.at(-1).text, /al campo de batalla de Rival/);
+  applyAction(room, a.id, { type: 'move', iid: c2.iid, to: 'graveyard', toPlayer: b.id });
+  assert.equal(b.zones.graveyard.at(-1).iid, c2.iid);
+  applyAction(room, a.id, { type: 'move', iid: c3.iid, to: 'library', toPlayer: b.id, position: 'top' });
+  assert.equal(b.zones.library.at(-1).iid, c3.iid);
+  // El rival la controla; al morir vuelve al cementerio de su dueño
+  applyAction(room, b.id, { type: 'move', iid: c1.iid, to: 'graveyard' });
+  assert.equal(a.zones.graveyard.at(-1).iid, c1.iid);
+  // Del campo propio al de otro, conservando posición
+  const mine = playOne(room, a);
+  applyAction(room, a.id, { type: 'move', iid: mine.iid, to: 'battlefield', toPlayer: b.id, x: 0.6, y: 0.1 });
+  assert.equal(b.zones.battlefield.at(-1).iid, mine.iid);
+  assert.equal(a.zones.battlefield.some((c) => c.iid === mine.iid), false);
 });

@@ -162,6 +162,39 @@ function findOnAnyBattlefield(room, iid) {
   return hit;
 }
 
+/** Una carta visible para todos (campo, cementerio, exilio o mando) de cualquier jugador. */
+function findPublicCard(room, iid) {
+  for (const pl of room.players) {
+    for (const zone of ['battlefield', 'graveyard', 'exile', 'command']) {
+      const card = pl.zones[zone].find((c) => c.iid === iid);
+      if (card) return { card, zone, owner: pl };
+    }
+  }
+  throw new GameError('Esa carta no está a la vista');
+}
+
+const ARROW_ZONES = new Set(['library', 'hand', 'graveyard', 'exile', 'command', 'battlefield']);
+function arrowTarget(room, t) {
+  // Compatibilidad: un string es el iid de una carta o el id de un jugador.
+  if (typeof t === 'string') t = room.players.some((pl) => pl.id === t) ? { kind: 'player', pid: t } : { kind: 'card', iid: t };
+  if (!t || typeof t !== 'object') throw new GameError('Destino de flecha inválido');
+  switch (t.kind) {
+    case 'card':
+      findPublicCard(room, str(t.iid, 64));
+      return { kind: 'card', iid: str(t.iid, 64) };
+    case 'player':
+      return { kind: 'player', pid: getPlayer(room, str(t.pid, 64)).id };
+    case 'zone': {
+      if (!ARROW_ZONES.has(t.zone)) throw new GameError('Zona inválida');
+      return { kind: 'zone', pid: getPlayer(room, str(t.pid, 64)).id, zone: t.zone };
+    }
+    case 'point':
+      return { kind: 'point', pid: getPlayer(room, str(t.pid, 64)).id, x: frac(t.x, 0.5), y: frac(t.y, 0.5) };
+    default:
+      throw new GameError('Destino de flecha inválido');
+  }
+}
+
 /** Suelta lo que estaba adjunto a una carta que deja el campo. */
 function detachFrom(room, hostIid) {
   for (const { card } of allBattlefieldCards(room)) if (card.attachedTo === hostIid) card.attachedTo = null;
@@ -217,8 +250,10 @@ function moveCard(room, p, iid, to, opts = {}) {
   if (!ZONES.includes(to)) throw new GameError('Zona inválida');
   const { zone: from, index, card } = findCard(p, iid);
   p.zones[from].splice(index, 1);
-  // Al dejar el campo, la carta vuelve a las zonas de su dueño (cambio de control).
-  const dest = to === 'battlefield' ? p : ownerOf(room, card, p);
+  // Destino: la zona de otro jugador si se pidió explícitamente; si no, al dejar el
+  // campo la carta vuelve a las zonas de su dueño (cambio de control).
+  const target = opts.toPlayer && opts.toPlayer !== p ? opts.toPlayer : null;
+  const dest = target ?? (to === 'battlefield' ? p : ownerOf(room, card, p));
   if (from === 'battlefield' && to !== 'battlefield') detachFrom(room, card.iid);
   const entersFaceDown = from !== 'battlefield' && to === 'battlefield' && Boolean(opts.faceDown);
   const name = publicName(card, from, to, entersFaceDown);
@@ -242,7 +277,7 @@ function moveCard(room, p, iid, to, opts = {}) {
   if (opts.position === 'bottom') dest.zones[to].unshift(card);
   else dest.zones[to].push(card);
 
-  if (from === to && to === 'battlefield') return; // solo reposicionó
+  if (from === to && to === 'battlefield' && dest === p) return; // solo reposicionó
   const where = to === 'library' && opts.position === 'bottom' ? 'al fondo de la biblioteca' : ZONE_TO[to];
   const whose = dest !== p ? ` de ${dest.name}` : '';
   log(room, `${p.name} mueve ${name} ${ZONE_FROM[from]} ${where}${whose}${entersFaceDown ? ' boca abajo' : ''}`);
@@ -331,7 +366,10 @@ export function applyAction(room, playerId, action) {
       return {};
     }
     case 'move':
-      moveCard(room, p, str(a.iid, 64), a.to, { position: a.position, x: a.x, y: a.y, faceDown: a.faceDown });
+      moveCard(room, p, str(a.iid, 64), a.to, {
+        position: a.position, x: a.x, y: a.y, faceDown: a.faceDown,
+        toPlayer: a.toPlayer ? getPlayer(room, str(a.toPlayer, 64)) : null,
+      });
       return {};
     case 'tap': {
       const c = battlefieldCard(p, str(a.iid, 64));
@@ -551,12 +589,11 @@ export function applyAction(room, playerId, action) {
       p.mana = emptyMana();
       return {};
     case 'arrow': {
-      // Flecha de una carta a otra (de cualquier jugador) o a un jugador.
+      // Flecha desde una carta pública hacia cualquier cosa de la mesa: una carta, un
+      // jugador, una zona (incluida la mano) o un punto del campo de un jugador.
       const from = str(a.from, 64);
-      findOnAnyBattlefield(room, from);
-      const to = str(a.to, 64);
-      const toPlayer = room.players.find((pl) => pl.id === to);
-      if (!toPlayer) findOnAnyBattlefield(room, to);
+      findPublicCard(room, from);
+      const to = arrowTarget(room, a.to);
       if (room.arrows.length >= 40) room.arrows.shift();
       room.arrows.push({ id: randomUUID(), owner: p.id, color: p.color, from, to });
       return {};

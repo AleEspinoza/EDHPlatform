@@ -382,11 +382,26 @@ function drawArrows() {
   const svg = $('#arrows');
   if (!state?.arrows?.length || $('#room').classList.contains('hidden')) return svg.replaceChildren();
   const ns = 'http://www.w3.org/2000/svg';
-  const center = (id) => {
-    const el = document.querySelector(`.battlefield .card[data-iid="${CSS.escape(id)}"]`) ?? document.querySelector(`.panel[data-pid="${CSS.escape(id)}"] .portrait`);
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  const mid = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null; };
+  const cardEl = (iid) => document.querySelector(`.battlefield .card[data-iid="${CSS.escape(iid)}"]`) ?? document.querySelector(`.card[data-iid="${CSS.escape(iid)}"]`);
+  const center = (target) => {
+    if (typeof target === 'string') return mid(cardEl(target)) ?? mid(document.querySelector(`.panel[data-pid="${CSS.escape(target)}"] .portrait`));
+    const panel = target.pid && document.querySelector(`.panel[data-pid="${CSS.escape(target.pid)}"]`);
+    switch (target.kind) {
+      case 'card': return mid(cardEl(target.iid));
+      case 'player': return mid(panel?.querySelector('.portrait'));
+      case 'zone':
+        if (target.zone === 'hand') return target.pid === $('#hand').dataset.owner ? mid($('#hand-wrap')) : mid(panel?.querySelector('[data-hand-of]') ?? panel?.querySelector('.portrait'));
+        if (target.zone === 'battlefield') return mid(panel?.querySelector('.battlefield'));
+        return mid(panel?.querySelector(`.pile[data-pile="${target.zone}"]`));
+      case 'point': {
+        const bf = panel?.querySelector('.battlefield');
+        if (!bf) return null;
+        const r = bf.getBoundingClientRect();
+        return { x: r.left + target.x * r.width, y: r.top + target.y * r.height };
+      }
+      default: return null;
+    }
   };
   const out = [];
   const defs = document.createElementNS(ns, 'defs');
@@ -501,7 +516,7 @@ function renderBattlefield(p, mine) {
     if (card.attachedTo && onField.has(card.attachedTo)) continue; // se dibuja junto a su anfitrión
     pushWithAttachments(card, p.id);
   }
-  const bf = h('div', { class: 'battlefield', dataset: { owner: p.id, ...(mine ? { drop: 'battlefield' } : {}) } }, ...els);
+  const bf = h('div', { class: 'battlefield', dataset: { owner: p.id, drop: 'battlefield' } }, ...els);
   if (!p.zones.battlefield.length && !els.length) {
     bf.append(h('div', { class: 'empty-hint' }, mine ? (p.hasDeck ? 'Arrastra cartas aquí para jugarlas' : 'Carga el mazo con el botón «Mazo»') : (p.hasDeck ? '' : 'Esperando su mazo…')));
   }
@@ -511,7 +526,7 @@ function renderBattlefield(p, mine) {
 function pile(p, zone) {
   const mine = isMine(p.id);
   const count = p.counts[zone];
-  const el = h('div', { class: 'pile', dataset: { pile: zone, owner: p.id, ...(mine ? { drop: zone } : {}) }, title: `${ZONE_NAMES[zone]} (${count})${!mine && zone === 'library' ? ' · clic derecho: acciones' : ''}` });
+  const el = h('div', { class: 'pile', dataset: { pile: zone, owner: p.id, drop: zone }, title: `${ZONE_NAMES[zone]} (${count})${!mine && zone === 'library' ? ' · clic derecho: acciones' : ''}` });
   if (zone === 'library') {
     el.append(count ? h('div', { class: 'card back' }) : h('div', { class: 'pile-empty' }));
   } else {
@@ -552,7 +567,7 @@ function renderPanel(p) {
   }, `☠ ${p.poison}`) : null;
 
   const handChip = !mine ? h('span', {
-    class: 'counts click',
+    class: 'counts click', dataset: { drop: 'hand', owner: p.id, handOf: p.id },
     title: 'Clic: acciones sobre su mano y biblioteca',
     onclick: (e) => opponentZoneMenu(e, p),
   }, `✋ ${p.counts.hand} · 📚 ${p.counts.library}`) : null;
@@ -580,7 +595,7 @@ function renderPanel(p) {
   const cmdCards = p.zones.command;
   const slots = Math.max(1, Math.min(2, Math.max(p.commanderNames.length, cmdCards.length)), cmdCards.length);
   const commandSlots = Array.from({ length: slots }, (_, i) => {
-    const el = h('div', { class: 'pile cmd', dataset: { pile: 'command', owner: p.id, ...(mine ? { drop: 'command' } : {}) }, title: 'Zona de mando' });
+    const el = h('div', { class: 'pile cmd', dataset: { pile: 'command', owner: p.id, drop: 'command' }, title: 'Zona de mando' });
     el.append(cmdCards[i] ? renderCard(cmdCards[i], { owner: p.id, zone: 'command' }) : h('div', { class: 'pile-empty' }));
     el.append(h('span', { class: 'pile-label' }, 'Mando'));
     return el;
@@ -594,10 +609,10 @@ function renderPanel(p) {
 
   return h('div', { class: `panel${isMe ? ' mine' : ' opp'}${state.activePlayerId === p.id ? ' active' : ''}${focusPid === p.id ? ' focused' : ''}`, style: { '--pc': p.color }, dataset: { pid: p.id } },
     h('div', { class: 'mat' }, renderBattlefield(p, mine)),
+    endTurn,
     h('div', { class: 'rail' },
       hero,
       h('div', { class: 'rail-spacer' }),
-      endTurn,
       h('div', { class: 'zones' }, pile(p, 'library'), pile(p, 'graveyard'), pile(p, 'exile'), ...commandSlots)));
 }
 
@@ -617,7 +632,7 @@ function renderMana(p, mine) {
 function freeSpot(p, card) {
   const isLand = /\bLand\b/.test(card.typeLine ?? '');
   const taken = p.zones.battlefield.map((c) => [c.x, c.y]);
-  const rows = isLand ? [0.92, 0.62] : [0.08, 0.38, 0.62];
+  const rows = isLand ? [0.56, 0.3] : [0.04, 0.3, 0.56];
   for (const y of rows) {
     for (let x = 0.02; x <= 0.98; x += 0.1) {
       if (!taken.some(([tx, ty]) => Math.abs(tx - x) < 0.07 && Math.abs(ty - y) < 0.2)) return { x, y };
@@ -641,16 +656,19 @@ function renderHand() {
   const width = $('#hand').clientWidth || 900;
   const cw = 112;
   const gap = n > 1 ? Math.min(cw * 0.78, (width - cw - 40) / (n - 1)) : 0;
+  // Cada carta va dentro de un «hueco» quieto que detecta el mouse; la carta se levanta
+  // dentro de él sin que el área de detección se mueva (así no parpadea).
   $('#hand').replaceChildren(...hand.map((c, i) => {
     const el = renderCard(c, { owner: p.id, zone: 'hand' });
-    const off = i - (n - 1) / 2; // posición relativa al centro del abanico
-    el.style.setProperty('--off', off);
-    el.style.setProperty('--gap', `${gap}px`);
-    el.style.setProperty('--rot', `${off * Math.min(4, 22 / Math.max(n, 1))}deg`);
-    el.style.setProperty('--drop', `${Math.abs(off) ** 2 * Math.min(3.2, 26 / Math.max(n, 1))}px`);
-    el.style.zIndex = String(10 + i);
     el.addEventListener('dblclick', () => act(p.id, { type: 'move', iid: c.iid, to: 'battlefield', ...freeSpot(p, c) }));
-    return el;
+    const off = i - (n - 1) / 2; // posición relativa al centro del abanico
+    const slot = h('div', { class: 'hand-slot' }, el);
+    slot.style.setProperty('--off', off);
+    slot.style.setProperty('--gap', `${gap}px`);
+    slot.style.setProperty('--rot', `${off * Math.min(4, 22 / Math.max(n, 1))}deg`);
+    slot.style.setProperty('--drop', `${Math.abs(off) ** 2 * Math.min(3.2, 26 / Math.max(n, 1))}px`);
+    slot.style.zIndex = String(10 + i);
+    return slot;
   }));
 }
 
@@ -678,26 +696,52 @@ function startTargeting(iid, pid, name, kind = 'attach') {
   document.body.classList.add('targeting');
   const banner = $('#target-banner');
   banner.textContent = kind === 'arrow'
-    ? 'Elige a qué apunta la flecha: una carta o el retrato de un jugador · Esc para cancelar'
+    ? 'Elige a qué apunta la flecha: una carta, una zona, un jugador o cualquier punto de la mesa · Esc para cancelar'
     : `Elige el permanente al que adjuntar ${name} · Esc para cancelar`;
   banner.classList.remove('hidden');
+}
+/** ¿A qué apunta el mouse? Una carta pública, una zona, un jugador o un punto del campo. */
+function arrowTargetAt(e) {
+  const t = e.target;
+  const card = t.closest('.card[data-iid]');
+  if (card && !t.closest('#hand') && ['battlefield', 'graveyard', 'exile', 'command'].includes(card.dataset.zone)) {
+    if (card.dataset.zone === 'battlefield') return { kind: 'card', iid: card.dataset.iid };
+  }
+  const pileEl = t.closest('.pile[data-pile]');
+  if (pileEl) return { kind: 'zone', pid: pileEl.dataset.owner, zone: pileEl.dataset.pile };
+  const handEl = t.closest('[data-hand-of]') ?? (t.closest('#hand-wrap') ? { dataset: { handOf: $('#hand').dataset.owner } } : null);
+  if (handEl) return { kind: 'zone', pid: handEl.dataset.handOf, zone: 'hand' };
+  if (t.closest('.portrait, .hero-portrait, .hero')) return { kind: 'player', pid: t.closest('.panel').dataset.pid };
+  const bf = t.closest('.panel[data-pid]')?.querySelector('.battlefield');
+  if (bf) {
+    const r = bf.getBoundingClientRect();
+    return { kind: 'point', pid: bf.dataset.owner, x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+  }
+  return null;
 }
 function stopTargeting() {
   targeting = null;
   document.body.classList.remove('targeting');
   $('#target-banner').classList.add('hidden');
 }
+let swallowClick = false; // el clic que cierra el modo apuntar no debe abrir nada más
+document.addEventListener('click', (e) => {
+  if (!swallowClick) return;
+  swallowClick = false;
+  e.preventDefault();
+  e.stopPropagation();
+}, true);
 document.addEventListener('pointerdown', (e) => {
   if (!targeting) return;
   e.preventDefault();
   e.stopPropagation();
+  swallowClick = true;
   const el = e.target.closest('.battlefield .card');
-  const hero = e.target.closest('.panel[data-pid] .portrait');
   const t = targeting;
   stopTargeting();
   if (t.kind === 'arrow') {
-    const to = el?.dataset.iid ?? hero?.closest('.panel').dataset.pid;
-    if (to && to !== t.iid) send({ type: 'arrow', from: t.iid, to });
+    const to = arrowTargetAt(e);
+    if (to && !(to.kind === 'card' && to.iid === t.iid)) send({ type: 'arrow', from: t.iid, to });
     return;
   }
   if (el && el.dataset.iid !== t.iid) act(t.pid, { type: 'attach', iid: t.iid, target: el.dataset.iid });
@@ -710,7 +754,7 @@ document.addEventListener('pointerdown', (e) => {
   const el = e.target.closest('.card[data-drag]');
   if (!el || el.closest('.modal')) return;
   const rect = el.getBoundingClientRect();
-  drag = { el, iid: el.dataset.iid, zone: el.dataset.zone, owner: el.dataset.owner, startX: e.clientX, startY: e.clientY, offX: e.clientX - rect.left, offY: e.clientY - rect.top, moved: false, ghost: null, shift: e.shiftKey };
+  drag = { el, iid: el.dataset.iid, zone: el.dataset.zone, owner: el.dataset.owner, startX: e.clientX, startY: e.clientY, offX: e.clientX - rect.left, offY: e.clientY - rect.top, fx: (e.clientX - rect.left) / rect.width, fy: (e.clientY - rect.top) / rect.height, moved: false, ghost: null, shift: e.shiftKey };
 });
 document.addEventListener('pointermove', (e) => {
   if (!drag) return;
@@ -722,6 +766,8 @@ document.addEventListener('pointermove', (e) => {
     ghost.classList.add('ghost');
     ghost.classList.remove('tapped', 'attached');
     ghost.style.width = `${drag.el.offsetWidth}px`;
+    drag.offX = drag.fx * drag.el.offsetWidth;
+    drag.offY = drag.fy * drag.el.offsetHeight;
     ghost.style.left = `${r.left}px`;
     ghost.style.top = `${r.top}px`;
     document.body.append(ghost);
@@ -732,7 +778,7 @@ document.addEventListener('pointermove', (e) => {
   drag.ghost.style.left = `${e.clientX - drag.offX}px`;
   drag.ghost.style.top = `${e.clientY - drag.offY}px`;
   document.querySelectorAll('.drop-hover').forEach((n) => n.classList.remove('drop-hover'));
-  dropTarget(e, drag.owner)?.classList.add('drop-hover');
+  dropTarget(e)?.classList.add('drop-hover');
 });
 document.addEventListener('pointerup', (e) => {
   if (!drag) return;
@@ -742,24 +788,36 @@ document.addEventListener('pointerup', (e) => {
   d.el.classList.remove('dragging-src');
   d.ghost?.remove();
   if (!d.moved) return onCardClick(d);
-  const target = dropTarget(e, d.owner);
+  const target = dropTarget(e);
   if (!target) return;
   const to = target.dataset.drop;
-  if (to === 'battlefield') {
+  const toPlayer = target.dataset.owner && target.dataset.owner !== d.owner ? target.dataset.owner : undefined;
+  if (toPlayer) {
+    // A la zona de otro jugador
+    let pos = {};
+    if (to === 'battlefield') {
+      const r = target.getBoundingClientRect();
+      const cw = parseFloat(getComputedStyle(target).getPropertyValue('--cw')) || d.w;
+      pos = {
+        x: Math.min(1, Math.max(0, (e.clientX - d.fx * cw - r.left) / Math.max(1, r.width - cw))),
+        y: Math.min(1, Math.max(0, (e.clientY - d.fy * cw * 1.397 - r.top) / Math.max(1, r.height - cw * 1.397))),
+      };
+    }
+    act(d.owner, { type: 'move', iid: d.iid, to, toPlayer, position: to === 'library' && e.shiftKey ? 'bottom' : 'top', ...pos });
+  } else if (to === 'battlefield') {
     const r = target.getBoundingClientRect();
     const cw = parseFloat(getComputedStyle(target).getPropertyValue('--cw')) || d.w;
     const ch = cw * 1.397;
-    const x = Math.min(1, Math.max(0, (e.clientX - d.offX * (cw / d.w) - r.left) / Math.max(1, r.width - cw)));
-    const y = Math.min(1, Math.max(0, (e.clientY - d.offY * (cw / d.w) - r.top) / Math.max(1, r.height - ch)));
+    const x = Math.min(1, Math.max(0, (e.clientX - d.fx * cw - r.left) / Math.max(1, r.width - cw)));
+    const y = Math.min(1, Math.max(0, (e.clientY - d.fy * ch - r.top) / Math.max(1, r.height - ch)));
     act(d.owner, d.zone === 'battlefield' ? { type: 'setPos', iid: d.iid, x, y } : { type: 'move', iid: d.iid, to, x, y });
   } else if (to !== d.zone || to === 'library') {
     act(d.owner, { type: 'move', iid: d.iid, to, position: to === 'library' && e.shiftKey ? 'bottom' : 'top' });
   }
 });
-/** Solo se suelta en zonas del mismo asiento que controla la carta. */
-function dropTarget(e, owner) {
-  const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-drop]');
-  return el && el.dataset.owner === owner ? el : null;
+/** Cualquier zona de cualquier jugador; si es de otro, la carta se le envía. */
+function dropTarget(e) {
+  return document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-drop]') ?? null;
 }
 function onCardClick(d) {
   if (d.zone === 'battlefield' && d.shift) {
@@ -848,8 +906,27 @@ function cardMenu(e, iid, zone) {
   }
   if (c.scryfallId) items.push({ label: '📖 Ver ficha (oráculo y rulings)', run: () => openCardInfo(c) }, '-');
   items.push(...moveItems(pid, iid, zone));
+  const otherPlayers = state.players.filter((o) => o.id !== pid);
+  if (otherPlayers.length && zone !== 'library') {
+    items.push(...otherPlayers.map((o) => ({ label: `📤 Enviar a ${o.name}…`, run: () => sendToMenu(e, pid, iid, o) })));
+  }
   if (zone !== 'library' || zoneView?.library) items.push('-', { label: 'Revelar a todos', run: () => act(pid, { type: 'reveal', iid }) });
   openMenu(e.clientX, e.clientY, c.faceDown && zone !== 'battlefield' ? 'Carta' : c.name, items);
+}
+
+function sendToMenu(e, pid, iid, target) {
+  const go = (to, position) => () => {
+    const extra = to === 'battlefield' ? freeSpot(target, findMyCard(iid)?.card ?? {}) : {};
+    act(pid, { type: 'move', iid, to, toPlayer: target.id, position, ...extra });
+  };
+  openMenu(e.clientX, e.clientY, `Enviar a ${target.name}`, [
+    { label: 'A su campo de batalla', run: go('battlefield') },
+    { label: 'A su mano', run: go('hand') },
+    { label: 'A su cementerio', run: go('graveyard') },
+    { label: 'A su exilio', run: go('exile') },
+    { label: 'Al tope de su biblioteca', run: go('library', 'top') },
+    { label: 'Al fondo de su biblioteca', run: go('library', 'bottom') },
+  ]);
 }
 
 function libraryMenu(e, pid) {
@@ -1371,7 +1448,7 @@ const SHORTCUTS = [
   { group: 'Acciones de carta (al pasar el cursor)', id: 'toBattlefield', label: 'Mover al campo de batalla', keys: 'a', run: moveTargets('battlefield') },
   { group: 'Acciones de carta (al pasar el cursor)', id: 'toTop', label: 'Mover al tope de la biblioteca', keys: 'l', run: moveTargets('library', { position: 'top' }) },
   { group: 'Acciones de carta (al pasar el cursor)', id: 'toBottom', label: 'Mover al fondo de la biblioteca', keys: 'b', run: moveTargets('library', { position: 'bottom' }) },
-  { group: 'Acciones de carta (al pasar el cursor)', id: 'arrow', label: 'Dibujar flecha', keys: 'w', run: () => { const hv = hovered && findVisibleCard(hovered.iid)?.zone === 'battlefield' ? hovered : null; if (hv) startTargeting(hv.iid, hv.owner, 'la flecha', 'arrow'); } },
+  { group: 'Acciones de carta (al pasar el cursor)', id: 'arrow', label: 'Dibujar flecha', keys: 'w', run: () => { const hv = hovered && ['battlefield', 'graveyard', 'exile', 'command'].includes(findVisibleCard(hovered.iid)?.zone) ? hovered : null; if (hv) startTargeting(hv.iid, hv.owner, 'la flecha', 'arrow'); } },
   { group: 'Acciones de carta (al pasar el cursor)', id: 'counters', label: 'Abrir contadores', keys: 'j', run: onHovered(BF, (hv) => { const n = Number.parseInt(prompt('Contadores a sumar (negativo para restar)', '1') ?? '', 10); if (n) act(hv.owner, { type: 'counters', iid: hv.iid, delta: n }); }) },
   { group: 'Acciones de carta (al pasar el cursor)', id: 'info', label: 'Ver ficha (oráculo y rulings)', keys: 'Shift+i', run: () => { const c = hovered && findVisibleCard(hovered.iid)?.card; if (c?.scryfallId && !c.faceDown) openCardInfo(c); } },
   // Contadores y fuerza/resistencia

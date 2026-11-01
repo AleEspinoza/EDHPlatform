@@ -6,13 +6,20 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { Server } from 'socket.io';
 import { createRoom, addPlayer, removePlayer, applyAction, viewFor, log, GameError } from './game.js';
+import { openDb } from './db.js';
+import { createAuth, parseCookies, SESSION_COOKIE } from './auth.js';
+import { createApi } from './api.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000; // salas sin actividad se eliminan a las 6 h
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sin 0/O/1/I
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export const db = openDb();
+const auth = createAuth(db);
 const app = express();
+if (process.env.TRUST_PROXY) app.set('trust proxy', 1); // detrás de Render/Railway/Fly
+app.use('/api', createApi({ db, auth }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 app.get('/health', (_req, res) => res.json({ ok: true, rooms: rooms.size }));
 
@@ -45,11 +52,18 @@ function seat(socket, room, player) {
 
 const reply = (ack, payload) => typeof ack === 'function' && ack(payload);
 
+// La cuenta (si hay sesión) viaja en la cookie del handshake.
+io.use((socket, next) => {
+  socket.data.user = auth.userFromToken(parseCookies(socket.handshake.headers.cookie)[SESSION_COOKIE]);
+  next();
+});
+const displayName = (socket, name) => (typeof name === 'string' && name.trim()) || socket.data.user?.username || '';
+
 io.on('connection', (socket) => {
   socket.on('createRoom', ({ name, solo } = {}, ack) => {
     const room = createRoom(newCode(), { solo: Boolean(solo) });
     rooms.set(room.code, room);
-    const player = addPlayer(room, name);
+    const player = addPlayer(room, displayName(socket, name));
     seat(socket, room, player);
     reply(ack, { ok: true, code: room.code, playerId: player.id, token: player.token });
     broadcast(room);
@@ -62,7 +76,7 @@ io.on('connection', (socket) => {
       let player = token && room.players.find((p) => p.token === token);
       if (player) log(room, `${player.name} se reconectó`);
       else if (room.solo) return reply(ack, { ok: false, error: 'Esa sala es una partida de práctica privada' });
-      else player = addPlayer(room, name);
+      else player = addPlayer(room, displayName(socket, name));
       seat(socket, room, player);
       reply(ack, { ok: true, code: room.code, playerId: player.id, token: player.token });
       broadcast(room);
@@ -113,6 +127,7 @@ io.on('connection', (socket) => {
 
 setInterval(() => {
   const now = Date.now();
+  auth.purge();
   for (const [code, room] of rooms) {
     if (now - room.lastActive > ROOM_TTL_MS && !room.players.some((p) => p.connected && !p.controlledBy)) rooms.delete(code);
   }

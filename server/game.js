@@ -239,7 +239,7 @@ function moveCard(room, p, iid, to, opts = {}) {
   log(room, `${p.name} mueve ${name} ${ZONE_FROM[from]} ${where}${whose}${entersFaceDown ? ' boca abajo' : ''}`);
 }
 
-function sanitizeDeckCard(c) {
+export function sanitizeDeckCard(c) {
   return {
     name: str(c?.name, 150), image: httpsUrl(c?.image), backImage: httpsUrl(c?.backImage),
     typeLine: str(c?.typeLine, 150), scryfallId: uuid(c?.scryfallId), tokens: sanitizeTokens(c?.tokens),

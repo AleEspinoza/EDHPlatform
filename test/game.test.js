@@ -316,3 +316,36 @@ test('modo solitario: asientos controlados por el anfitrión', () => {
   applyAction(room, host.id, { type: 'removeSeat', target: seat.id });
   assert.equal(room.players.includes(seat), false);
 });
+
+// ---------- v0.7: mecánicas de los atajos de EDHPlay ----------
+test('fuerza/resistencia, contadores en bloque, fases, maná, flechas, reacciones y fondo de biblioteca', () => {
+  const { room, a, b } = setup();
+  const x = playOne(room, a);
+  const y = playOne(room, a);
+  applyAction(room, a.id, { type: 'pt', iid: x.iid, dp: 1, dt: 0 });
+  applyAction(room, a.id, { type: 'pt', iid: x.iid, dp: 0, dt: 2 });
+  assert.deepEqual(x.ptMod, { p: 1, t: 2 });
+  applyAction(room, a.id, { type: 'counters', iid: y.iid, delta: 3 });
+  applyAction(room, a.id, { type: 'countersAll', op: 'double' });
+  assert.equal(y.counters, 6);
+  assert.equal(x.counters, 0, 'sin contadores no se toca');
+  applyAction(room, a.id, { type: 'move', iid: x.iid, to: 'graveyard' });
+  assert.equal(x.ptMod, null, 'se limpia al dejar el campo');
+
+  applyAction(room, a.id, { type: 'phase' });
+  assert.equal(viewFor(room, a.id).phaseName, 'Principal 1');
+  assert.throws(() => applyAction(room, b.id, { type: 'phase' }), /activo/);
+  applyAction(room, a.id, { type: 'mana', color: 'U', delta: 2 });
+  assert.equal(a.mana.U, 2);
+  applyAction(room, a.id, { type: 'arrow', from: y.iid, to: b.id });
+  assert.equal(room.arrows.length, 1);
+  applyAction(room, a.id, { type: 'passTurn' });
+  assert.equal(room.phase, 0);
+  assert.equal(room.arrows.length, 0, 'las flechas se borran al pasar el turno');
+  assert.equal(a.mana.U, 0);
+
+  assert.equal(applyAction(room, a.id, { type: 'react', kind: 'think' }).event.emoji, '🤔');
+  const bottom = a.zones.library[0];
+  const res = applyAction(room, a.id, { type: 'peek', n: 2, from: 'bottom' });
+  assert.equal(res.private.cards[0].iid, bottom.iid);
+});

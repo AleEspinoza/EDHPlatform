@@ -31,6 +31,11 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const uuid = (v) => (typeof v === 'string' && UUID.test(v) ? v.toLowerCase() : null);
 const httpsUrl = (v) => (typeof v === 'string' && /^https:\/\/[^\s"'<>]+$/.test(v) ? v.slice(0, 500) : null);
 
+export const PHASES = ['Inicio', 'Principal 1', 'Combate', 'Principal 2', 'Final'];
+export const REACTIONS = { up: '👍', think: '🤔', wow: '😮', cry: '😢' };
+const MANA = ['W', 'U', 'B', 'R', 'G', 'C'];
+const emptyMana = () => Object.fromEntries(MANA.map((m) => [m, 0]));
+
 function emptyZones() {
   return Object.fromEntries(ZONES.map((z) => [z, []]));
 }
@@ -58,6 +63,7 @@ function makeCard(data, extra = {}) {
     faceDown: false,
     transformed: false,
     counters: 0,
+    ptMod: null, // { p, t } modificadores de fuerza/resistencia
     x: 0.05,
     y: 0.05,
     token: false,
@@ -73,6 +79,7 @@ function sanitizeTokens(list) {
 
 function resetCardState(card) {
   card.attachedTo = null;
+  card.ptMod = null;
   card.tapped = false;
   card.faceDown = false;
   card.transformed = false;
@@ -80,7 +87,7 @@ function resetCardState(card) {
 }
 
 export function createRoom(code, { solo = false } = {}) {
-  return { code, solo, hostId: null, createdAt: Date.now(), lastActive: Date.now(), players: [], log: [], activePlayerId: null, turn: 0, gameStartedAt: null };
+  return { code, solo, hostId: null, createdAt: Date.now(), lastActive: Date.now(), players: [], log: [], activePlayerId: null, turn: 0, gameStartedAt: null, phase: 0, arrows: [] };
 }
 
 export function addPlayer(room, name, { controlledBy = null, userId = null } = {}) {
@@ -94,6 +101,7 @@ export function addPlayer(room, name, { controlledBy = null, userId = null } = {
     life: STARTING_LIFE,
     poison: 0,
     cmdDamage: {},
+    mana: emptyMana(),
     zones: emptyZones(),
     deck: null, // lista original para reiniciar
     connected: true,
@@ -452,9 +460,11 @@ export function applyAction(room, playerId, action) {
       // Ver las N cartas del tope (0 = toda la biblioteca). Solo para el dueño.
       const n = int(a.n, 0, 300, 0);
       const lib = p.zones.library;
-      const cards = (n === 0 ? lib.slice() : lib.slice(-n)).reverse(); // tope primero
-      log(room, n === 0 ? `${p.name} busca en su biblioteca` : `${p.name} mira las ${n} cartas del tope de su biblioteca`);
-      return { private: { kind: 'library', n, cards } };
+      const bottom = a.from === 'bottom';
+      // Siempre ordenadas desde el tope; las del fondo, desde la más profunda hacia arriba.
+      const cards = n === 0 ? lib.slice().reverse() : bottom ? lib.slice(0, n) : lib.slice(-n).reverse();
+      log(room, n === 0 ? `${p.name} busca en su biblioteca` : `${p.name} mira las ${n} cartas del ${bottom ? 'fondo' : 'tope'} de su biblioteca`);
+      return { private: { kind: 'library', n, from: bottom ? 'bottom' : 'top', cards } };
     }
     case 'reveal': {
       const { card } = findCard(p, str(a.iid, 64));
@@ -477,6 +487,9 @@ export function applyAction(room, playerId, action) {
       const next = room.players[(idx + 1) % room.players.length];
       room.activePlayerId = next.id;
       room.turn += 1;
+      room.phase = 0;
+      room.arrows = [];
+      for (const pl of room.players) pl.mana = emptyMana();
       room.gameStartedAt ??= Date.now();
       log(room, `Turno ${room.turn}: ${next.name}`);
       return {};
@@ -498,6 +511,63 @@ export function applyAction(room, playerId, action) {
         log(room, 'Revancha: todos los mazos se barajan de nuevo');
       }
       return { record, event: { kind: 'gameOver', winner: winner?.name ?? null, color: winner?.color ?? null, by: p.name } };
+    }
+    case 'pt': {
+      const c = battlefieldCard(p, str(a.iid, 64));
+      const dp = int(a.dp, -20, 20, 0);
+      const dt = int(a.dt, -20, 20, 0);
+      const mod = { p: (c.ptMod?.p ?? 0) + dp, t: (c.ptMod?.t ?? 0) + dt };
+      c.ptMod = mod.p || mod.t ? mod : null;
+      const fmt = (v) => (v >= 0 ? `+${v}` : `${v}`);
+      log(room, `${p.name}: ${c.faceDown ? 'una carta' : c.name} queda en ${fmt(mod.p)}/${fmt(mod.t)}`);
+      return {};
+    }
+    case 'countersAll': {
+      const op = a.op;
+      if (!['inc', 'double', 'dec'].includes(op)) throw new GameError('Operación de contadores inválida');
+      let changed = 0;
+      for (const c of p.zones.battlefield) {
+        if (!c.counters) continue;
+        c.counters = op === 'inc' ? c.counters + 1 : op === 'dec' ? c.counters - 1 : c.counters * 2;
+        changed++;
+      }
+      const verb = { inc: 'suma 1 contador a', double: 'duplica los contadores de', dec: 'quita 1 contador a' }[op];
+      log(room, `${p.name} ${verb} ${changed} permanente${changed === 1 ? '' : 's'}`);
+      return {};
+    }
+    case 'phase': {
+      if (room.activePlayerId !== p.id && !p.controlledBy) throw new GameError('Solo el jugador activo avanza la fase');
+      room.phase = (room.phase + 1) % PHASES.length;
+      log(room, `Fase: ${PHASES[room.phase]}`);
+      return {};
+    }
+    case 'mana': {
+      const color = String(a.color);
+      if (!MANA.includes(color)) throw new GameError('Color de maná inválido');
+      p.mana[color] = int(p.mana[color] + int(a.delta, -20, 20, 0), 0, 99, 0);
+      return {};
+    }
+    case 'clearMana':
+      p.mana = emptyMana();
+      return {};
+    case 'arrow': {
+      // Flecha de una carta a otra (de cualquier jugador) o a un jugador.
+      const from = str(a.from, 64);
+      findOnAnyBattlefield(room, from);
+      const to = str(a.to, 64);
+      const toPlayer = room.players.find((pl) => pl.id === to);
+      if (!toPlayer) findOnAnyBattlefield(room, to);
+      if (room.arrows.length >= 40) room.arrows.shift();
+      room.arrows.push({ id: randomUUID(), owner: p.id, color: p.color, from, to });
+      return {};
+    }
+    case 'clearArrows':
+      room.arrows = room.arrows.filter((ar) => ar.owner !== p.id);
+      return {};
+    case 'react': {
+      const emoji = REACTIONS[a.kind];
+      if (!emoji) throw new GameError('Reacción desconocida');
+      return { event: { kind: 'react', pid: p.id, emoji } };
     }
     case 'reset': {
       if (!p.deck) throw new GameError('No hay mazo cargado');
@@ -660,7 +730,7 @@ function chatCommand(room, p, text) {
 
 const HIDDEN_CARD = (c) => ({
   iid: c.iid, faceDown: true, tapped: c.tapped, x: c.x, y: c.y, counters: c.counters, token: c.token,
-  attachedTo: c.attachedTo, ownerId: c.ownerId,
+  attachedTo: c.attachedTo, ownerId: c.ownerId, ptMod: c.ptMod,
 });
 
 /** Vista del estado para un jugador: oculta mano y biblioteca ajenas y cartas boca abajo. */
@@ -670,6 +740,9 @@ export function viewFor(room, viewerId) {
     activePlayerId: room.activePlayerId,
     turn: room.turn,
     gameStartedAt: room.gameStartedAt,
+    phase: room.phase,
+    phaseName: PHASES[room.phase],
+    arrows: room.arrows,
     you: viewerId,
     solo: room.solo,
     hostId: room.hostId,
@@ -683,6 +756,7 @@ export function viewFor(room, viewerId) {
         life: p.life,
         poison: p.poison,
         cmdDamage: p.cmdDamage,
+        mana: p.mana,
         connected: p.connected,
         controlledBy: p.controlledBy,
         hasDeck: Boolean(p.deck),

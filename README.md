@@ -1,6 +1,6 @@
 # EDH Platform
 
-Versión 0.8
+Versión 0.9
 
 Mesa virtual de Commander/EDH con salas privadas, mazos importados y todas las acciones del juego en tiempo real.
 
@@ -14,7 +14,7 @@ Mesa virtual de Commander/EDH con salas privadas, mazos importados y todas las a
 - **Terminar partida** eligiendo al ganador (o empate), con revancha opcional; queda en el historial de cada jugador. Si la sala se cierra a mitad de partida, se guarda como «sin terminar».
 - **Mazos guardados**: créalos desde el inicio o al cargarlos en una sala; jugar uno es un clic, sin volver a consultar Scryfall.
 - **Atajos idénticos a EDHPlay** y reasignables (tecla `I` o botón ⌨): `Espacio` pasar turno, `D` robar, `U` enderezar, `Q` avanzar fase, `M` maná, `V` ver biblioteca, `P`/`Shift+P` ver tope/fondo, `O` moneda, `N` ficha; sobre una carta `T` girar, `A` al campo, `G` cementerio, `E` exilio, `H` mano, `L`/`B` tope/fondo, `Z` boca abajo, `F` voltear, `X` copia, `W` flecha, `+`/`_` contadores, `Alt+1..4` fuerza/resistencia; `1–6` enfocar jugador y `7–0` reacciones.
-- **Tapetes a elección**: cada jugador elige el suyo (imagen o uno de 15 colores planos) y todos lo ven; se recuerda entre partidas. Para agregar imágenes basta dejarlas en `public/assets/mats/`.
+- **Tapetes a elección**: cada jugador elige el suyo (imagen, uno de 6 animados tipo lámpara de lava o uno de 15 colores planos) y todos lo ven; se recuerda entre partidas. Para agregar imágenes basta dejarlas en `public/assets/mats/`.
 - **Enviar cartas a otros jugadores**: arrastrándolas a su campo, mano (✋), cementerio, exilio o biblioteca, o con «Enviar a…»; siguen siendo tuyas como dueño.
 - **Selección múltiple** (Shift+clic o `Ctrl+A`), **flechas** desde una carta hacia otra carta, una zona (incluida la mano), un jugador o cualquier punto de la mesa, **fases** del turno, **rastreador de maná** y **modificadores +X/+Y**.
 - **Importar desde Moxfield por link** (apagado por defecto; ver abajo).
@@ -43,7 +43,15 @@ npm start          # http://localhost:3000
 npm test           # motor de juego + partida por sockets
 ```
 
-Para jugar con amigos fuera de tu red, despliega en cualquier hosting de Node con WebSockets (Render, Railway, Fly.io) o expón tu puerto local con un túnel (`cloudflared tunnel --url http://localhost:3000`).
+### Publicarlo gratis en Render
+
+1. Crea una cuenta en [render.com](https://render.com) entrando con GitHub.
+2. **New → Blueprint**, elige el repo `EDHPlatform` y confirma: `render.yaml` ya trae la configuración.
+3. En un par de minutos queda en `https://edhplatform-xxxx.onrender.com`. Cada `git push` a `main` lo vuelve a desplegar.
+
+Límites del plan gratuito: se duerme tras 15 minutos sin tráfico (despierta en ~1 minuto con la primera visita) y **el disco se borra al dormir, reiniciar o redesplegar**, así que las cuentas, mazos e historial guardados en SQLite se pierden. Sirve para probar partidas; para datos que duren hay que mover la base a un servicio externo (por ejemplo Turso, que tiene plan gratis).
+
+Para una prueba rápida desde tu computador también sirve un túnel: `npx cloudflared tunnel --url http://localhost:3000`.
 
 ### Variables de entorno
 

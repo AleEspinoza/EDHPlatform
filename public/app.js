@@ -26,6 +26,32 @@ const store = {
   del(k) { try { localStorage.removeItem(k); } catch { /* sin almacenamiento */ } },
 };
 
+// ---------- Arte (public/assets) ----------
+// Cada imagen es opcional: si existe (.webp o .png) se expone como variable CSS --a-<nombre>
+// y clase .has-<nombre> en <html>; si no, la interfaz usa su respaldo dibujado con CSS.
+const ASSETS = [
+  'table', 'lobby', 'card-back', 'hand-tray',
+  'mats/tavern', 'mats/crypt', 'mats/forest', 'mats/arcane', 'mats/volcano', 'mats/sea',
+  'zones/frame', 'zones/deck', 'zones/graveyard', 'zones/exile', 'zones/command', 'zones/deck-stack',
+  'hero/frame', 'hero/life', 'hero/poison', 'hero/commander',
+  'ui/end-turn', 'ui/end-turn-active', 'ui/coin-heads', 'ui/coin-tails', 'ui/d20',
+  'banners/trigger', 'banners/respond', 'banners/wait', 'banners/ok', 'banners/your-turn', 'banners/victory',
+];
+const assetUrls = {};
+const assetSlug = (name) => name.replace(/\//g, '-');
+const assetsReady = fetch('/assets-manifest.json').then((r) => r.json()).then(({ files }) => {
+  const have = new Set(files);
+  for (const name of ASSETS) {
+    const file = ['webp', 'png', 'jpg'].map((ext) => `${name}.${ext}`).find((f) => have.has(f));
+    if (!file) continue;
+    const url = `/assets/${file}`;
+    assetUrls[name] = url;
+    document.documentElement.style.setProperty(`--a-${assetSlug(name)}`, `url("${url}")`);
+    document.documentElement.classList.add(`has-${assetSlug(name)}`);
+  }
+}).catch(() => { /* sin arte: se usan los respaldos */ });
+const asset = (name) => assetUrls[name] ?? null;
+
 const socket = io({ transports: ['websocket', 'polling'] });
 let state = null; // última vista recibida del servidor
 let session = store.get('edh.session'); // { code, token, name }
@@ -98,6 +124,7 @@ socket.on('state', (s) => {
 socket.on('event', (ev) => {
   if (ev.kind === 'announce') return showAnnouncement(ev);
   if (ev.kind === 'gameOver') return showGameOver(ev);
+  if (ev.kind === 'react') return showReaction(ev);
   if (ev.kind === 'coin') return showCoin(ev);
   if (ev.kind === 'dice') return showDice(ev);
   if (ev.kind === 'reveal') return toastCards(`${ev.player} revela`, [ev.card]);
@@ -330,8 +357,13 @@ function render() {
   $('#turn-player').textContent = active?.name ?? '—';
   $('#turn-player').style.color = active?.color ?? '';
 
-  const opps = state.players.filter((p) => p.id !== state.you);
+  const mineIds = new Set(myPlayers().flatMap((pl) => pl.zones.battlefield.map((c) => c.iid)));
+  for (const iid of selected) if (!mineIds.has(iid)) selected.delete(iid);
+  if (focusPid && !playerById(focusPid)) focusPid = null;
+  $('#phase-chip').textContent = state.phaseName ?? '';
+  const opps = state.players.filter((p) => p.id !== state.you && (!focusPid || p.id === focusPid));
   const oppBox = $('#opponents');
+  oppBox.classList.toggle('focus', Boolean(focusPid));
   oppBox.style.setProperty('--opp-cols', Math.min(3, Math.max(1, opps.length)));
   oppBox.style.height = opps.length > 3 ? '46%' : '';
   oppBox.replaceChildren(...opps.map((p) => renderPanel(p)));
@@ -340,13 +372,64 @@ function render() {
   renderHand();
   renderLog();
   for (const iid of entering) document.querySelector(`.battlefield .card[data-iid="${CSS.escape(iid)}"]`)?.classList.add('enter');
+  requestAnimationFrame(drawArrows);
   if (zoneView && !zoneView.library) renderZoneModal();
 }
-addEventListener('resize', () => state && renderHand());
+addEventListener('resize', () => { if (state) { renderHand(); drawArrows(); } });
+
+// ---------- Flechas ----------
+function drawArrows() {
+  const svg = $('#arrows');
+  if (!state?.arrows?.length || $('#room').classList.contains('hidden')) return svg.replaceChildren();
+  const ns = 'http://www.w3.org/2000/svg';
+  const center = (id) => {
+    const el = document.querySelector(`.battlefield .card[data-iid="${CSS.escape(id)}"]`) ?? document.querySelector(`.panel[data-pid="${CSS.escape(id)}"] .portrait`);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  };
+  const out = [];
+  const defs = document.createElementNS(ns, 'defs');
+  for (const ar of state.arrows) {
+    const a = center(ar.from);
+    const b = center(ar.to);
+    if (!a || !b) continue;
+    const mid = { x: (a.x + b.x) / 2, y: Math.min(a.y, b.y) - Math.max(40, Math.abs(a.x - b.x) * 0.25) };
+    const marker = document.createElementNS(ns, 'marker');
+    marker.setAttribute('id', `m-${ar.id}`);
+    for (const [k, v] of Object.entries({ viewBox: '0 0 10 10', refX: 6, refY: 5, markerWidth: 5, markerHeight: 5, orient: 'auto-start-reverse' })) marker.setAttribute(k, v);
+    const tip = document.createElementNS(ns, 'path');
+    tip.setAttribute('d', 'M0,0 L10,5 L0,10 z');
+    tip.setAttribute('fill', ar.color);
+    marker.append(tip);
+    defs.append(marker);
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', `M${a.x},${a.y} Q${mid.x},${mid.y} ${b.x},${b.y}`);
+    path.setAttribute('stroke', ar.color);
+    path.setAttribute('class', 'arrow-path');
+    path.setAttribute('marker-end', `url(#m-${ar.id})`);
+    out.push(path);
+  }
+  svg.replaceChildren(defs, ...out);
+}
+
+// ---------- Reacciones ----------
+function showReaction(ev) {
+  const portrait = document.querySelector(`.panel[data-pid="${CSS.escape(ev.pid)}"] .portrait`);
+  if (!portrait) return;
+  const r = portrait.getBoundingClientRect();
+  const el = h('div', { class: 'reaction', style: { left: `${r.left + r.width / 2}px`, top: `${r.top}px` } }, ev.emoji);
+  document.body.append(el);
+  setTimeout(() => el.remove(), 2200);
+}
 
 function turnBanner(p) {
   if (!p) return;
   const mineTurn = isMine(p.id);
+  if (mineTurn && p.id === state.you && asset('banners/your-turn')) {
+    const el = h('div', { class: 'comic-pop', style: { '--pc': p.color } }, h('div', { class: 'comic-rays' }), h('img', { class: 'comic-card', src: asset('banners/your-turn'), alt: 'Tu turno' }));
+    return onStage(el, 1800);
+  }
   const el = h('div', { class: `turn-banner${mineTurn ? ' mine' : ''}`, style: { '--pc': p.color } },
     h('span', { class: 'turn-title' }, mineTurn ? (p.id === state.you ? 'Tu turno' : `Turno de ${p.name}`) : `Turno de ${p.name}`),
     h('span', { class: 'turn-sub' }, `Turno ${state.turn}`));
@@ -370,6 +453,8 @@ function renderCard(c, { owner, zone, att = 0 }) {
   });
   if (!img && !c.faceDown) el.append(c.name);
   if (c.counters) el.append(h('span', { class: `badge${c.counters < 0 ? ' neg' : ''}` }, c.counters > 0 ? `+${c.counters}` : c.counters));
+  if (c.ptMod) el.append(h('span', { class: 'pt' }, `${c.ptMod.p >= 0 ? '+' : ''}${c.ptMod.p}/${c.ptMod.t >= 0 ? '+' : ''}${c.ptMod.t}`));
+  if (selected.has(c.iid)) el.classList.add('selected');
   if (c.token) el.append(h('span', { class: 'tag' }, 'TOKEN'));
   else if (c.faceDown && mine && zone === 'battlefield') el.append(h('span', { class: 'tag' }, 'OCULTA'));
   // Carta controlada por alguien que no es su dueño: marca con el color del dueño.
@@ -433,7 +518,7 @@ function pile(p, zone) {
     const top = p.zones[zone]?.at(-1);
     el.append(top ? renderCard(top, { owner: p.id, zone }) : h('div', { class: 'pile-empty' }));
   }
-  el.append(h('span', { class: 'pile-label' }, `${zone === 'library' ? 'Biblio' : zone === 'graveyard' ? 'Cement.' : 'Exilio'} ${count}`));
+  el.append(h('span', { class: 'pile-label' }, { library: 'Mazo', graveyard: 'Cementerio', exile: 'Exilio' }[zone], h('b', {}, count)));
   return el;
 }
 
@@ -476,28 +561,56 @@ function renderPanel(p) {
   const portrait = h('div', { class: `portrait${art ? '' : ' empty'}`, style: art ? { backgroundImage: `url("${art}")` } : {}, title: p.commanderNames.join(' + ') || p.name },
     p.commanderImages?.[1] ? h('span', { class: 'partner', style: { backgroundImage: `url("${artCrop(p.commanderImages[1])}")` } }) : null);
 
-  const head = h('div', { class: 'panel-head' },
-    portrait,
-    h('span', { class: 'pname' },
-      h('span', { class: `dot${p.connected ? '' : ' off'}`, title: p.connected ? 'Conectado' : 'Desconectado' }), p.name,
-      isMe ? h('span', { class: 'muted small' }, '(tú)') : null,
-      isSeat && mine ? h('span', { class: 'muted small' }, '(asiento)') : null,
-      isSeat && mine ? h('button', { class: 'seat-x', title: 'Quitar asiento', onclick: () => confirm(`¿Quitar el asiento ${p.name}?`) && send({ type: 'removeSeat', target: p.id }) }, '×') : null),
-    h('span', { class: 'cmdnames' }, p.commanderNames.join(' + ')),
-    isSeat && mine ? h('button', { class: 'btn small ghost', onclick: () => openDeckModal(p.id) }, 'Mazo') : null,
-    handChip, poison, ...cmdStats,
-    h('span', { class: `life${p.life <= 10 ? ' low' : ''}` }, mine ? lifeBtn(-1, '−') : null, h('b', { title: 'Vida' }, p.life), mine ? lifeBtn(1, '+') : null),
-  );
+  const life = h('span', { class: `life${p.life <= 10 ? ' low' : ''}` },
+    mine ? lifeBtn(-1, '−') : null, h('b', { title: 'Vida' }, p.life), mine ? lifeBtn(1, '+') : null);
 
-  const command = h('div', { class: 'pile cmd', dataset: { pile: 'command', owner: p.id, ...(mine ? { drop: 'command' } : {}) }, title: 'Zona de mando' });
-  const cmdTop = p.zones.command.at(-1);
-  command.append(cmdTop ? renderCard(cmdTop, { owner: p.id, zone: 'command' }) : h('div', { class: 'pile-empty' }));
-  command.append(h('span', { class: 'pile-label' }, `Mando ${p.counts.command}`));
+  const hero = h('div', { class: 'hero' },
+    h('div', { class: 'hero-portrait' }, portrait, life),
+    h('div', { class: 'hero-info' },
+      h('span', { class: 'pname' },
+        h('span', { class: `dot${p.connected ? '' : ' off'}`, title: p.connected ? 'Conectado' : 'Desconectado' }), p.name,
+        isMe ? h('span', { class: 'muted small' }, '(tú)') : null,
+        isSeat && mine ? h('span', { class: 'muted small' }, '(asiento)') : null,
+        isSeat && mine ? h('button', { class: 'seat-x', title: 'Quitar asiento', onclick: () => confirm(`¿Quitar el asiento ${p.name}?`) && send({ type: 'removeSeat', target: p.id }) }, '×') : null),
+      h('span', { class: 'cmdnames' }, p.commanderNames.join(' + ')),
+      h('div', { class: 'hero-stats' }, handChip, poison, ...cmdStats, isSeat && mine ? h('button', { class: 'btn small ghost', onclick: () => openDeckModal(p.id) }, 'Mazo') : null),
+      renderMana(p, mine)));
 
-  return h('div', { class: `panel${isMe ? ' mine' : ' opp'}${state.activePlayerId === p.id ? ' active' : ''}`, style: { '--pc': p.color }, dataset: { pid: p.id } },
-    head,
-    h('div', { class: 'panel-body' }, h('div', { class: 'zones' }, command, pile(p, 'library'), pile(p, 'graveyard'), pile(p, 'exile')), renderBattlefield(p, mine)),
-  );
+  // Zona de mando: un espacio por comandante (uno o dos).
+  const cmdCards = p.zones.command;
+  const slots = Math.max(1, Math.min(2, Math.max(p.commanderNames.length, cmdCards.length)), cmdCards.length);
+  const commandSlots = Array.from({ length: slots }, (_, i) => {
+    const el = h('div', { class: 'pile cmd', dataset: { pile: 'command', owner: p.id, ...(mine ? { drop: 'command' } : {}) }, title: 'Zona de mando' });
+    el.append(cmdCards[i] ? renderCard(cmdCards[i], { owner: p.id, zone: 'command' }) : h('div', { class: 'pile-empty' }));
+    el.append(h('span', { class: 'pile-label' }, 'Mando'));
+    return el;
+  });
+
+  const myTurn = state.activePlayerId === state.you;
+  const endTurn = isMe ? h('button', {
+    id: 'btn-pass', class: `end-turn${myTurn ? ' ready' : ''}`, title: 'Pasar el turno (Espacio)',
+    onclick: () => send({ type: 'passTurn' }),
+  }, h('span', {}, myTurn ? 'Pasar turno' : 'Turno rival')) : null;
+
+  return h('div', { class: `panel${isMe ? ' mine' : ' opp'}${state.activePlayerId === p.id ? ' active' : ''}${focusPid === p.id ? ' focused' : ''}`, style: { '--pc': p.color }, dataset: { pid: p.id } },
+    h('div', { class: 'mat' }, renderBattlefield(p, mine)),
+    h('div', { class: 'rail' },
+      hero,
+      h('div', { class: 'rail-spacer' }),
+      endTurn,
+      h('div', { class: 'zones' }, pile(p, 'library'), pile(p, 'graveyard'), pile(p, 'exile'), ...commandSlots)));
+}
+
+const MANA_COLORS = [['W', '#f4ecc8', 'Blanco'], ['U', '#4f8fd8', 'Azul'], ['B', '#4b3f52', 'Negro'], ['R', '#d9553f', 'Rojo'], ['G', '#3f9b5c', 'Verde'], ['C', '#b9b3a8', 'Incoloro']];
+function renderMana(p, mine) {
+  const any = Object.values(p.mana ?? {}).some(Boolean);
+  if (!any && !(mine && showMana)) return null;
+  return h('div', { class: 'mana', title: mine ? 'Maná flotante. Clic +1, clic derecho −1 (se vacía al pasar el turno)' : 'Maná flotante' },
+    ...MANA_COLORS.filter(([c]) => mine || p.mana[c]).map(([c, color, name]) => h('button', {
+      class: `pip${p.mana[c] ? ' on' : ''}`, style: { '--mc': color }, title: name, disabled: !mine,
+      onclick: mine ? () => act(p.id, { type: 'mana', color: c, delta: 1 }) : null,
+      oncontextmenu: mine ? (e) => { e.preventDefault(); act(p.id, { type: 'mana', color: c, delta: -1 }); } : null,
+    }, h('i', {}, c), h('b', {}, p.mana[c] || ''))));
 }
 
 /** Siguiente hueco libre del campo: tierras en la fila de abajo, el resto arriba. */
@@ -560,11 +673,13 @@ function showPreview(c, mine) {
 }
 
 // ---------- Apuntar (adjuntar) ----------
-function startTargeting(iid, pid, name) {
-  targeting = { iid, pid, name };
+function startTargeting(iid, pid, name, kind = 'attach') {
+  targeting = { iid, pid, name, kind };
   document.body.classList.add('targeting');
   const banner = $('#target-banner');
-  banner.textContent = `Elige el permanente al que adjuntar ${name} · Esc para cancelar`;
+  banner.textContent = kind === 'arrow'
+    ? 'Elige a qué apunta la flecha: una carta o el retrato de un jugador · Esc para cancelar'
+    : `Elige el permanente al que adjuntar ${name} · Esc para cancelar`;
   banner.classList.remove('hidden');
 }
 function stopTargeting() {
@@ -577,8 +692,14 @@ document.addEventListener('pointerdown', (e) => {
   e.preventDefault();
   e.stopPropagation();
   const el = e.target.closest('.battlefield .card');
+  const hero = e.target.closest('.panel[data-pid] .portrait');
   const t = targeting;
   stopTargeting();
+  if (t.kind === 'arrow') {
+    const to = el?.dataset.iid ?? hero?.closest('.panel').dataset.pid;
+    if (to && to !== t.iid) send({ type: 'arrow', from: t.iid, to });
+    return;
+  }
   if (el && el.dataset.iid !== t.iid) act(t.pid, { type: 'attach', iid: t.iid, target: el.dataset.iid });
 }, true);
 
@@ -589,7 +710,7 @@ document.addEventListener('pointerdown', (e) => {
   const el = e.target.closest('.card[data-drag]');
   if (!el || el.closest('.modal')) return;
   const rect = el.getBoundingClientRect();
-  drag = { el, iid: el.dataset.iid, zone: el.dataset.zone, owner: el.dataset.owner, startX: e.clientX, startY: e.clientY, offX: e.clientX - rect.left, offY: e.clientY - rect.top, moved: false, ghost: null };
+  drag = { el, iid: el.dataset.iid, zone: el.dataset.zone, owner: el.dataset.owner, startX: e.clientX, startY: e.clientY, offX: e.clientX - rect.left, offY: e.clientY - rect.top, moved: false, ghost: null, shift: e.shiftKey };
 });
 document.addEventListener('pointermove', (e) => {
   if (!drag) return;
@@ -641,6 +762,12 @@ function dropTarget(e, owner) {
   return el && el.dataset.owner === owner ? el : null;
 }
 function onCardClick(d) {
+  if (d.zone === 'battlefield' && d.shift) {
+    // Shift + clic: agregar o quitar de la selección múltiple.
+    if (selected.has(d.iid)) selected.delete(d.iid);
+    else selected.add(d.iid);
+    return render();
+  }
   if (d.zone === 'battlefield') act(d.owner, { type: 'tap', iid: d.iid });
   else if (d.zone === 'graveyard' || d.zone === 'exile' || d.zone === 'command') openZone(d.owner, d.zone);
 }
@@ -812,7 +939,7 @@ function renderZoneModal() {
   $('#btn-zone-shuffle').classList.toggle('hidden', !zoneView?.library);
   if (zoneView.library) {
     const who = zoneView.pid === state.you ? 'tu biblioteca' : `la biblioteca de ${playerById(zoneView.pid)?.name}`;
-    $('#zone-title').textContent = zoneView.n ? `Tope de ${who} (${zoneView.cards.length})` : `Buscar en ${who} (${zoneView.cards.length})`;
+    $('#zone-title').textContent = zoneView.n ? `${zoneView.from === 'bottom' ? 'Fondo' : 'Tope'} de ${who} (${zoneView.cards.length})` : `Buscar en ${who} (${zoneView.cards.length})`;
     $('#zone-hint').textContent = 'Ordenadas desde el tope. Clic en una carta para moverla. Tus rivales no ven estas cartas.';
     grid.replaceChildren(...zoneView.cards.map((c) => {
       const el = renderCard(c, { owner: zoneView.pid, zone: 'library' });
@@ -837,10 +964,10 @@ function renderZoneModal() {
   }));
 }
 
-async function peekLibrary(pid, n) {
-  const res = await act(pid, { type: 'peek', n });
+async function peekLibrary(pid, n, from = 'top') {
+  const res = await act(pid, { type: 'peek', n, from });
   if (!res?.ok) return;
-  zoneView = { library: true, pid, n, cards: res.private.cards };
+  zoneView = { library: true, pid, n, from, cards: res.private.cards };
   renderZoneModal();
   openModal('#modal-zone');
 }
@@ -1113,7 +1240,7 @@ async function openCardInfo(c) {
 }
 
 // ---------- Barra superior ----------
-$('#btn-pass').addEventListener('click', () => send({ type: 'passTurn' }));
+$('#phase-chip').addEventListener('click', () => send({ type: 'phase' }));
 $('#btn-d20').addEventListener('click', () => send({ type: 'roll', sides: 20 }));
 $('#btn-coin').addEventListener('click', () => send({ type: 'coin' }));
 $('#btn-token').addEventListener('click', () => openTokenModal(handSeat ?? state.you));
@@ -1149,7 +1276,7 @@ $('#btn-end').addEventListener('click', () => {
     class: 'end-player', style: { '--pc': p.color },
     onclick: () => endGame(p.id),
   },
-  h('span', { class: 'portrait small', style: artCrop(p.commanderImages?.[0]) ? { backgroundImage: `url("${artCrop(p.commanderImages[0])}")` } : {} }),
+  h('span', { class: 'end-portrait', style: artCrop(p.commanderImages?.[0]) ? { backgroundImage: `url("${artCrop(p.commanderImages[0])}")` } : {} }),
   h('span', {}, h('b', {}, p.name), h('span', { class: 'muted small' }, p.commanderNames.join(' + ') || 'Sin comandante')),
   h('span', { class: 'end-cta' }, 'Ganó'))));
   openModal('#modal-end');
@@ -1160,6 +1287,11 @@ async function endGame(winner) {
   if (res?.ok) closeModal('#modal-end');
 }
 function showGameOver(ev) {
+  if (ev.winner && asset('banners/victory')) {
+    const el = h('div', { class: 'comic-pop', style: { '--pc': ev.color ?? 'var(--gold)' } }, h('div', { class: 'comic-rays' }),
+      h('img', { class: 'comic-card', src: asset('banners/victory'), alt: 'Victoria' }), h('div', { class: 'comic-who' }, `${ev.winner} gana`));
+    return onStage(el, 3400);
+  }
   const el = h('div', { class: 'turn-banner mine', style: { '--pc': ev.color ?? 'var(--brass)' } },
     h('span', { class: 'turn-title' }, ev.winner ? `🏆 ${ev.winner} gana` : 'Empate'),
     h('span', { class: 'turn-sub' }, 'La partida quedó guardada en el historial'));
@@ -1176,74 +1308,117 @@ $('#chat-form').addEventListener('submit', (e) => {
   });
 });
 
-// ---------- Atajos de teclado (reasignables) ----------
-// Una combinación se escribe como «Shift+d», «Space», «Delete», «+». Las letras ignoran
-// mayúsculas; los símbolos ignoran Shift (en cada teclado el «+» está en otra tecla).
+// ---------- Atajos de teclado (reasignables, por defecto los de EDHPlay) ----------
+// Combinación: «Ctrl+», «Alt+», «Shift+» + tecla. Letras y números se leen por posición
+// física (e.code), así funcionan igual con Alt en Mac; los símbolos por carácter (+, -, =, _).
 const seatNow = () => handSeat ?? state.you;
-/** Carta bajo el mouse que controlo, con su zona. */
+let selected = new Set(); // cartas seleccionadas (selección múltiple)
+let cardScale = Number(store.get('edh.scale', 1)) || 1;
+let showMana = store.get('edh.mana', false);
+let focusPid = null;
+
+/** Carta bajo el mouse que controlo. */
 const hoveredMine = (zones) => (hovered && isMine(hovered.owner) && (!zones || zones.includes(hovered.zone)) ? hovered : null);
-const moveHovered = (to, extra = {}) => {
-  const hv = hoveredMine();
-  if (!hv) return;
-  const found = findMyCard(hv.iid);
-  const pos = to === 'battlefield' && found ? freeSpot(playerById(hv.owner), found.card) : {};
-  act(hv.owner, { type: 'move', iid: hv.iid, to, ...pos, ...extra });
-};
+/** Objetivos de una acción de carta: la selección, o si no hay, la carta bajo el mouse. */
+function targets(zones) {
+  if (selected.size) {
+    return [...selected].map((iid) => ({ iid, ...findMyCard(iid) })).filter((t) => t.card && (!zones || zones.includes(t.zone))).map((t) => ({ iid: t.iid, owner: t.pid, zone: t.zone }));
+  }
+  const hv = hoveredMine(zones);
+  return hv ? [hv] : [];
+}
+const eachTarget = (zones, fn) => () => { for (const t of targets(zones)) fn(t); };
+const moveTargets = (to, extra = {}) => eachTarget(null, (t) => {
+  const found = findMyCard(t.iid);
+  const pos = to === 'battlefield' && found ? freeSpot(playerById(t.owner), found.card) : {};
+  act(t.owner, { type: 'move', iid: t.iid, to, ...pos, ...extra });
+});
 const onHovered = (zones, fn) => () => { const hv = hoveredMine(zones); if (hv) fn(hv); };
+const BF = ['battlefield'];
 
 const SHORTCUTS = [
-  { group: 'Partida', id: 'passTurn', label: 'Pasar el turno', keys: 'Space', run: () => send({ type: 'passTurn' }) },
-  { group: 'Partida', id: 'untapAll', label: 'Enderezar todo', keys: 'u', run: () => act(seatNow(), { type: 'untapAll' }) },
-  { group: 'Partida', id: 'draw', label: 'Robar una carta', keys: 'd', run: () => act(seatNow(), { type: 'draw', n: 1 }) },
-  { group: 'Partida', id: 'drawX', label: 'Robar X cartas…', keys: 'Shift+d', run: () => { const n = askNumber('¿Cuántas cartas robar?', 7); if (n) act(seatNow(), { type: 'draw', n }); } },
-  { group: 'Partida', id: 'mill', label: 'Moler una carta', keys: 'l', run: () => act(seatNow(), { type: 'mill', n: 1 }) },
-  { group: 'Partida', id: 'peek', label: 'Mirar el tope X…', keys: 'x', run: () => { const n = askNumber('¿Cuántas cartas mirar?', 3); if (n) peekLibrary(seatNow(), n); } },
-  { group: 'Partida', id: 'search', label: 'Buscar en la biblioteca', keys: 'b', run: () => peekLibrary(seatNow(), 0) },
-  { group: 'Partida', id: 'shuffle', label: 'Barajar la biblioteca', keys: 's', run: () => act(seatNow(), { type: 'shuffle' }) },
-  { group: 'Partida', id: 'mulligan', label: 'Mulligan', keys: 'm', run: () => confirm('¿Hacer mulligan?') && act(seatNow(), { type: 'mulligan' }) },
-  { group: 'Partida', id: 'lifeDown', label: 'Perder 1 de vida', keys: 'ArrowDown', run: () => act(seatNow(), { type: 'life', delta: -1 }) },
-  { group: 'Partida', id: 'lifeUp', label: 'Ganar 1 de vida', keys: 'ArrowUp', run: () => act(seatNow(), { type: 'life', delta: 1 }) },
-  { group: 'Partida', id: 'token', label: 'Crear token…', keys: 'n', run: () => openTokenModal(seatNow()) },
-  { group: 'Partida', id: 'coin', label: 'Lanzar una moneda', keys: 'c', run: () => send({ type: 'coin' }) },
-  { group: 'Partida', id: 'd20', label: 'Lanzar un d20', keys: 'j', run: () => send({ type: 'roll', sides: 20 }) },
-  { group: 'Mesa', id: 'respond', label: 'Anunciar «¡Respondo!»', keys: 'r', run: () => send({ type: 'announce', kind: 'respond' }) },
-  { group: 'Mesa', id: 'trigger', label: 'Anunciar trigger (de la carta, si hay una)', keys: 'g', run: () => { const hv = hoveredMine(['battlefield', 'graveyard', 'exile', 'command']); act(hv?.owner ?? state.you, { type: 'announce', kind: 'trigger', iid: hv?.iid }); } },
-  { group: 'Mesa', id: 'wait', label: 'Anunciar «¡Espera!»', keys: 'w', run: () => send({ type: 'announce', kind: 'wait' }) },
-  { group: 'Mesa', id: 'ok', label: 'Anunciar «OK, sigue»', keys: 'o', run: () => send({ type: 'announce', kind: 'ok' }) },
-  { group: 'Mesa', id: 'chat', label: 'Escribir en el chat', keys: 'Enter', run: () => $('#chat-input').focus() },
-  { group: 'Mesa', id: 'keys', label: 'Ver los atajos', keys: 'k', run: () => openKeys() },
-  { group: 'Carta bajo el mouse', id: 'tap', label: 'Girar / enderezar', keys: 't', run: onHovered(['battlefield'], (hv) => act(hv.owner, { type: 'tap', iid: hv.iid })) },
-  { group: 'Carta bajo el mouse', id: 'play', label: 'Jugar al campo', keys: 'p', run: () => moveHovered('battlefield') },
-  { group: 'Carta bajo el mouse', id: 'faceDown', label: 'Boca abajo / boca arriba', keys: 'f', run: onHovered(['battlefield'], (hv) => act(hv.owner, { type: 'flip', iid: hv.iid })) },
-  { group: 'Carta bajo el mouse', id: 'transform', label: 'Transformar', keys: 'q', run: onHovered(['battlefield'], (hv) => act(hv.owner, { type: 'transform', iid: hv.iid })) },
-  { group: 'Carta bajo el mouse', id: 'counterUp', label: 'Agregar contador', keys: '+', run: onHovered(['battlefield'], (hv) => act(hv.owner, { type: 'counters', iid: hv.iid, delta: 1 })) },
-  { group: 'Carta bajo el mouse', id: 'counterDown', label: 'Quitar contador', keys: '-', run: onHovered(['battlefield'], (hv) => act(hv.owner, { type: 'counters', iid: hv.iid, delta: -1 })) },
-  { group: 'Carta bajo el mouse', id: 'toGraveyard', label: 'Al cementerio', keys: 'Delete', run: () => moveHovered('graveyard') },
-  { group: 'Carta bajo el mouse', id: 'toExile', label: 'Al exilio', keys: 'e', run: () => moveHovered('exile') },
-  { group: 'Carta bajo el mouse', id: 'toHand', label: 'A la mano', keys: 'h', run: () => moveHovered('hand') },
-  { group: 'Carta bajo el mouse', id: 'toTop', label: 'Al tope de la biblioteca', keys: 'a', run: () => moveHovered('library', { position: 'top' }) },
-  { group: 'Carta bajo el mouse', id: 'toBottom', label: 'Al fondo de la biblioteca', keys: 'Shift+a', run: () => moveHovered('library', { position: 'bottom' }) },
-  { group: 'Carta bajo el mouse', id: 'clone', label: 'Crear copia (token)', keys: 'Shift+c', run: onHovered(['battlefield'], (hv) => act(hv.owner, { type: 'clone', iid: hv.iid })) },
-  { group: 'Carta bajo el mouse', id: 'reveal', label: 'Revelar a todos', keys: 'Shift+r', run: onHovered(null, (hv) => act(hv.owner, { type: 'reveal', iid: hv.iid })) },
-  { group: 'Carta bajo el mouse', id: 'info', label: 'Ver ficha', keys: 'i', run: () => { const c = hovered && findVisibleCard(hovered.iid)?.card; if (c?.scryfallId && !c.faceDown) openCardInfo(c); } },
+  // Acciones globales
+  { group: 'Acciones globales', id: 'passTurn', label: 'Pasar turno', keys: 'Space', run: () => send({ type: 'passTurn' }) },
+  { group: 'Acciones globales', id: 'draw', label: 'Robar carta', keys: 'd', run: () => act(seatNow(), { type: 'draw', n: 1 }) },
+  { group: 'Acciones globales', id: 'untapAll', label: 'Enderezar todo', keys: 'u', run: () => act(seatNow(), { type: 'untapAll' }) },
+  { group: 'Acciones globales', id: 'sizeUp', label: 'Aumentar tamaño de carta', keys: '=', run: () => setScale(cardScale + 0.1) },
+  { group: 'Acciones globales', id: 'sizeDown', label: 'Reducir tamaño de carta', keys: '-', run: () => setScale(cardScale - 0.1) },
+  { group: 'Acciones globales', id: 'mana', label: 'Alternar rastreador de maná', keys: 'm', run: () => { showMana = !showMana; store.set('edh.mana', showMana); render(); } },
+  { group: 'Acciones globales', id: 'phase', label: 'Avanzar fase', keys: 'q', run: () => send({ type: 'phase' }) },
+  { group: 'Acciones globales', id: 'lifeUp', label: 'Aumentar vida', keys: 'ArrowUp', run: () => act(seatNow(), { type: 'life', delta: 1 }) },
+  { group: 'Acciones globales', id: 'lifeDown', label: 'Disminuir vida', keys: 'ArrowDown', run: () => act(seatNow(), { type: 'life', delta: -1 }) },
+  { group: 'Acciones globales', id: 'chat', label: 'Alternar chat', keys: 'c', run: () => { document.body.classList.toggle('no-side'); renderHand(); drawArrows(); } },
+  { group: 'Acciones globales', id: 'shuffle', label: 'Barajar biblioteca', keys: 's', run: () => act(seatNow(), { type: 'shuffle' }) },
+  { group: 'Acciones globales', id: 'library', label: 'Ver biblioteca', keys: 'v', run: () => peekLibrary(seatNow(), 0) },
+  { group: 'Acciones globales', id: 'peekTop', label: 'Ver las X cartas superiores', keys: 'p', run: () => { const n = askNumber('¿Cuántas cartas del tope?', 3); if (n) peekLibrary(seatNow(), n); } },
+  { group: 'Acciones globales', id: 'peekBottom', label: 'Ver las X cartas inferiores', keys: 'Shift+p', run: () => { const n = askNumber('¿Cuántas cartas del fondo?', 1); if (n) peekLibrary(seatNow(), n, 'bottom'); } },
+  { group: 'Acciones globales', id: 'coin', label: 'Lanzar una moneda', keys: 'o', run: () => send({ type: 'coin' }) },
+  { group: 'Acciones globales', id: 'token', label: 'Crear ficha', keys: 'n', run: () => openTokenModal(seatNow()) },
+  { group: 'Acciones globales', id: 'keys', label: 'Abrir atajos', keys: 'i', run: () => openKeys() },
+  { group: 'Acciones globales', id: 'clearArrows', label: 'Eliminar todas mis flechas', keys: '', run: () => send({ type: 'clearArrows' }) },
+  { group: 'Acciones globales', id: 'topCard', label: 'Ver la carta superior de la biblioteca', keys: '', run: () => peekLibrary(seatNow(), 1) },
+  { group: 'Acciones globales', id: 'bottomCard', label: 'Ver la carta inferior de la biblioteca', keys: '', run: () => peekLibrary(seatNow(), 1, 'bottom') },
+  { group: 'Acciones globales', id: 'selectAll', label: 'Seleccionar todas las cartas (campo)', keys: 'Ctrl+a', run: () => { selected = new Set((playerById(seatNow())?.zones.battlefield ?? []).map((c) => c.iid)); render(); } },
+  // Acciones de carta (al pasar el cursor; con selección, sobre todas las seleccionadas)
+  { group: 'Acciones de carta (al pasar el cursor)', id: 'tap', label: 'Girar / enderezar', keys: 't', run: eachTarget(BF, (t) => act(t.owner, { type: 'tap', iid: t.iid })) },
+  { group: 'Acciones de carta (al pasar el cursor)', id: 'transform', label: 'Voltear (cartas de doble cara)', keys: 'f', run: eachTarget(BF, (t) => act(t.owner, { type: 'transform', iid: t.iid })) },
+  { group: 'Acciones de carta (al pasar el cursor)', id: 'faceDown', label: 'Alternar boca abajo', keys: 'z', run: eachTarget(BF, (t) => act(t.owner, { type: 'flip', iid: t.iid })) },
+  { group: 'Acciones de carta (al pasar el cursor)', id: 'clone', label: 'Crear copia de ficha', keys: 'x', run: eachTarget(BF, (t) => act(t.owner, { type: 'clone', iid: t.iid })) },
+  { group: 'Acciones de carta (al pasar el cursor)', id: 'reveal', label: 'Revelar', keys: 'r', run: onHovered(null, (hv) => act(hv.owner, { type: 'reveal', iid: hv.iid })) },
+  { group: 'Acciones de carta (al pasar el cursor)', id: 'toHand', label: 'Mover a la mano', keys: 'h', run: moveTargets('hand') },
+  { group: 'Acciones de carta (al pasar el cursor)', id: 'toGraveyard', label: 'Mover al cementerio', keys: 'g', run: moveTargets('graveyard') },
+  { group: 'Acciones de carta (al pasar el cursor)', id: 'toExile', label: 'Mover al exilio', keys: 'e', run: moveTargets('exile') },
+  { group: 'Acciones de carta (al pasar el cursor)', id: 'toBattlefield', label: 'Mover al campo de batalla', keys: 'a', run: moveTargets('battlefield') },
+  { group: 'Acciones de carta (al pasar el cursor)', id: 'toTop', label: 'Mover al tope de la biblioteca', keys: 'l', run: moveTargets('library', { position: 'top' }) },
+  { group: 'Acciones de carta (al pasar el cursor)', id: 'toBottom', label: 'Mover al fondo de la biblioteca', keys: 'b', run: moveTargets('library', { position: 'bottom' }) },
+  { group: 'Acciones de carta (al pasar el cursor)', id: 'arrow', label: 'Dibujar flecha', keys: 'w', run: () => { const hv = hovered && findVisibleCard(hovered.iid)?.zone === 'battlefield' ? hovered : null; if (hv) startTargeting(hv.iid, hv.owner, 'la flecha', 'arrow'); } },
+  { group: 'Acciones de carta (al pasar el cursor)', id: 'counters', label: 'Abrir contadores', keys: 'j', run: onHovered(BF, (hv) => { const n = Number.parseInt(prompt('Contadores a sumar (negativo para restar)', '1') ?? '', 10); if (n) act(hv.owner, { type: 'counters', iid: hv.iid, delta: n }); }) },
+  { group: 'Acciones de carta (al pasar el cursor)', id: 'info', label: 'Ver ficha (oráculo y rulings)', keys: 'Shift+i', run: () => { const c = hovered && findVisibleCard(hovered.iid)?.card; if (c?.scryfallId && !c.faceDown) openCardInfo(c); } },
+  // Contadores y fuerza/resistencia
+  { group: 'Contadores y fuerza/resistencia', id: 'counterUp', label: 'Añadir contador +1/+1', keys: '+', run: eachTarget(BF, (t) => act(t.owner, { type: 'counters', iid: t.iid, delta: 1 })) },
+  { group: 'Contadores y fuerza/resistencia', id: 'counterDown', label: 'Añadir contador −1/−1', keys: '_', run: eachTarget(BF, (t) => act(t.owner, { type: 'counters', iid: t.iid, delta: -1 })) },
+  { group: 'Contadores y fuerza/resistencia', id: 'countersInc', label: 'Incrementar todos los contadores', keys: 'Ctrl+1', run: () => act(seatNow(), { type: 'countersAll', op: 'inc' }) },
+  { group: 'Contadores y fuerza/resistencia', id: 'countersDouble', label: 'Duplicar todos los contadores', keys: 'Ctrl+2', run: () => act(seatNow(), { type: 'countersAll', op: 'double' }) },
+  { group: 'Contadores y fuerza/resistencia', id: 'countersDec', label: 'Decrementar todos los contadores', keys: 'Ctrl+3', run: () => act(seatNow(), { type: 'countersAll', op: 'dec' }) },
+  { group: 'Contadores y fuerza/resistencia', id: 'powerUp', label: 'Incrementar fuerza', keys: 'Alt+1', run: eachTarget(BF, (t) => act(t.owner, { type: 'pt', iid: t.iid, dp: 1, dt: 0 })) },
+  { group: 'Contadores y fuerza/resistencia', id: 'toughUp', label: 'Incrementar resistencia', keys: 'Alt+2', run: eachTarget(BF, (t) => act(t.owner, { type: 'pt', iid: t.iid, dp: 0, dt: 1 })) },
+  { group: 'Contadores y fuerza/resistencia', id: 'powerDown', label: 'Decrementar fuerza', keys: 'Alt+3', run: eachTarget(BF, (t) => act(t.owner, { type: 'pt', iid: t.iid, dp: -1, dt: 0 })) },
+  { group: 'Contadores y fuerza/resistencia', id: 'toughDown', label: 'Decrementar resistencia', keys: 'Alt+4', run: eachTarget(BF, (t) => act(t.owner, { type: 'pt', iid: t.iid, dp: 0, dt: -1 })) },
+  // Enfocar jugadores
+  ...[1, 2, 3, 4, 5, 6].map((n) => ({ group: 'Enfocar jugadores', id: `focus${n}`, label: `Enfocar jugador ${n}`, keys: String(n), run: () => focusPlayer(n) })),
+  // Reacciones
+  { group: 'Reacciones', id: 'reactUp', label: 'Pulgar arriba 👍', keys: '7', run: () => send({ type: 'react', kind: 'up' }) },
+  { group: 'Reacciones', id: 'reactThink', label: 'Pensando 🤔', keys: '8', run: () => send({ type: 'react', kind: 'think' }) },
+  { group: 'Reacciones', id: 'reactWow', label: 'Asombro 😮', keys: '9', run: () => send({ type: 'react', kind: 'wow' }) },
+  { group: 'Reacciones', id: 'reactCry', label: 'Llanto 😢', keys: '0', run: () => send({ type: 'react', kind: 'cry' }) },
+  // Extras de EDH Platform (EDHPlay no los tiene)
+  { group: 'Anuncios (extra)', id: 'respond', label: 'Anunciar «¡Respondo!»', keys: 'Shift+r', run: () => send({ type: 'announce', kind: 'respond' }) },
+  { group: 'Anuncios (extra)', id: 'trigger', label: 'Anunciar trigger (de la carta, si hay una)', keys: 'Shift+g', run: () => { const hv = hoveredMine(['battlefield', 'graveyard', 'exile', 'command']); act(hv?.owner ?? state.you, { type: 'announce', kind: 'trigger', iid: hv?.iid }); } },
+  { group: 'Anuncios (extra)', id: 'wait', label: 'Anunciar «¡Espera!»', keys: 'Shift+e', run: () => send({ type: 'announce', kind: 'wait' }) },
+  { group: 'Anuncios (extra)', id: 'ok', label: 'Anunciar «OK, sigue»', keys: 'Shift+o', run: () => send({ type: 'announce', kind: 'ok' }) },
+  { group: 'Anuncios (extra)', id: 'drawX', label: 'Robar X cartas', keys: 'Shift+d', run: () => { const n = askNumber('¿Cuántas cartas robar?', 7); if (n) act(seatNow(), { type: 'draw', n }); } },
+  { group: 'Anuncios (extra)', id: 'mulligan', label: 'Mulligan', keys: '', run: () => confirm('¿Hacer mulligan?') && act(seatNow(), { type: 'mulligan' }) },
+  { group: 'Anuncios (extra)', id: 'chatFocus', label: 'Escribir en el chat', keys: 'Enter', run: () => $('#chat-input').focus() },
 ];
-let keyOverrides = store.get('edh.keys', {});
+let keyOverrides = store.get('edh.keys.v2', {});
 const bindingOf = (sc) => keyOverrides[sc.id] ?? sc.keys;
 
 function comboFromEvent(e) {
-  const named = { ' ': 'Space', Backspace: 'Delete', Del: 'Delete' };
-  let key = named[e.key] ?? e.key;
-  if (['Shift', 'Control', 'Alt', 'Meta'].includes(key)) return null;
-  if (key.length === 1) {
-    if (/[a-z0-9ñ]/i.test(key)) return `${e.shiftKey ? 'Shift+' : ''}${key.toLowerCase()}`;
-    return key === '=' ? '+' : key === '_' ? '-' : key; // símbolos: sin Shift
-  }
-  return `${e.shiftKey ? 'Shift+' : ''}${key}`;
+  if (['Shift', 'Control', 'Alt', 'Meta', 'AltGraph'].includes(e.key)) return null;
+  const mods = `${e.ctrlKey || e.metaKey ? 'Ctrl+' : ''}${e.altKey ? 'Alt+' : ''}`;
+  const letter = /^Key([A-Z])$/.exec(e.code);
+  const digit = /^(?:Digit|Numpad)(\d)$/.exec(e.code);
+  if (letter) return `${mods}${e.shiftKey ? 'Shift+' : ''}${letter[1].toLowerCase()}`;
+  if (digit) return `${mods}${e.shiftKey ? 'Shift+' : ''}${digit[1]}`;
+  const named = { ' ': 'Space', Backspace: 'Delete', Del: 'Delete', NumpadAdd: '+', NumpadSubtract: '-' };
+  const key = named[e.key] ?? named[e.code] ?? e.key;
+  if (key.length === 1) return `${mods}${key}`; // símbolos: el carácter ya incluye Shift
+  return `${mods}${e.shiftKey ? 'Shift+' : ''}${key}`;
 }
-const KEY_NAMES = { Space: 'Espacio', Delete: 'Supr / Retroceso', Enter: 'Enter', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Escape: 'Esc' };
-const comboLabel = (combo) => (combo ? combo.split('+').filter(Boolean).map((part) => KEY_NAMES[part] ?? (part.length === 1 ? part.toUpperCase() : part)).join(' + ') || combo : '—');
+const KEY_NAMES = { Space: 'Espacio', Delete: 'Supr', Enter: 'Enter', ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Escape: 'Esc', Ctrl: 'Ctrl', Alt: 'Alt', Shift: 'Shift' };
+const comboLabel = (combo) => (combo ? combo.split(/\+(?!$)/).map((part) => KEY_NAMES[part] ?? (part.length === 1 ? part.toUpperCase() : part)).join(' + ') : 'Sin asignar');
 
-let capturing = null; // id del atajo que se está reasignando
+let capturing = null;
 function openKeys() {
   renderKeys();
   openModal('#modal-keys');
@@ -1253,20 +1428,37 @@ function renderKeys() {
   $('#keys-list').replaceChildren(...groups.map((g) => h('section', { class: 'keys-group' },
     h('h3', {}, g),
     ...SHORTCUTS.filter((sc) => sc.group === g).map((sc) => h('div', { class: 'key-row' },
-      h('span', {}, sc.label),
       h('button', {
-        class: `keycap${capturing === sc.id ? ' capturing' : ''}${keyOverrides[sc.id] !== undefined ? ' custom' : ''}`,
+        class: `keycap${capturing === sc.id ? ' capturing' : ''}${keyOverrides[sc.id] !== undefined ? ' custom' : ''}${bindingOf(sc) ? '' : ' unset'}`,
         onclick: () => { capturing = sc.id; renderKeys(); },
-      }, capturing === sc.id ? 'Presiona una tecla…' : comboLabel(bindingOf(sc))))))));
+      }, capturing === sc.id ? 'Presiona…' : comboLabel(bindingOf(sc))),
+      h('span', {}, sc.label))))),
+  h('p', { class: 'muted small keys-note' }, 'En Chrome, Ctrl+1, Ctrl+2 y Ctrl+3 cambian de pestaña y no se pueden capturar; si los usas, reasígnalos. Próximamente: «Agregar a la pila».'));
 }
 $('#btn-keys').addEventListener('click', openKeys);
 $('#btn-keys-reset').addEventListener('click', () => {
   keyOverrides = {};
-  store.del('edh.keys');
+  store.del('edh.keys.v2');
   capturing = null;
   renderKeys();
-  toast('Atajos restaurados');
+  toast('Atajos restaurados a los de EDHPlay');
 });
+
+function setScale(v) {
+  cardScale = Math.round(Math.min(1.8, Math.max(0.6, v)) * 10) / 10;
+  store.set('edh.scale', cardScale);
+  document.documentElement.style.setProperty('--scale', cardScale);
+  drawArrows();
+}
+document.documentElement.style.setProperty('--scale', cardScale);
+
+function focusPlayer(n) {
+  const p = state.players[n - 1];
+  if (!p) return;
+  focusPid = focusPid === p.id || p.id === state.you ? null : p.id;
+  render();
+  if (focusPid) toast(`Enfocando a ${p.name}. Presiona ${n} otra vez para volver.`);
+}
 
 document.addEventListener('keydown', (e) => {
   if (capturing) {
@@ -1274,22 +1466,25 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { capturing = null; return renderKeys(); }
     const combo = comboFromEvent(e);
     if (!combo) return;
-    // Si otra acción usaba esa tecla, queda sin asignar.
     for (const sc of SHORTCUTS) if (sc.id !== capturing && bindingOf(sc) === combo) keyOverrides[sc.id] = '';
     keyOverrides[capturing] = combo;
-    store.set('edh.keys', keyOverrides);
+    store.set('edh.keys.v2', keyOverrides);
     capturing = null;
     return renderKeys();
   }
-  if (e.key === 'Escape' && targeting) return stopTargeting();
-  if (e.key === 'Escape') { closeMenu(); document.querySelectorAll('.modal:not(.hidden)').forEach((m) => closeModal(`#${m.id}`)); return; }
-  if (!state || e.target.closest('input, textarea, select') || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'Escape') {
+    if (targeting) return stopTargeting();
+    if (selected.size) { selected.clear(); return render(); }
+    closeMenu();
+    document.querySelectorAll('.modal:not(.hidden)').forEach((m) => closeModal(`#${m.id}`));
+    return;
+  }
+  if (!state || e.target.closest('input, textarea, select')) return;
   if (document.querySelector('.modal:not(.hidden)')) return;
-  if (e.key === '?') return openKeys();
   const combo = comboFromEvent(e);
   const sc = combo && SHORTCUTS.find((x) => bindingOf(x) === combo);
   if (!sc) return;
-  e.preventDefault(); // p. ej. que Espacio no desplace la página
+  e.preventDefault(); // que Espacio no desplace la página ni Ctrl+A seleccione texto
   closeMenu();
   sc.run();
 });
@@ -1340,7 +1535,19 @@ function chime(freqs) {
     });
   } catch { /* audio no disponible */ }
 }
+const BANNER_FOR = { trigger: 'banners/trigger', respond: 'banners/respond', wait: 'banners/wait', ok: 'banners/ok' };
 function showAnnouncement(ev) {
+  const art = asset(BANNER_FOR[ev.ann]);
+  if (art) {
+    const el = h('div', { class: `comic-pop ann-${ev.ann}`, style: { '--pc': ev.color } },
+      h('div', { class: 'comic-rays' }),
+      h('img', { class: 'comic-card', src: art, alt: ev.text }),
+      h('div', { class: 'comic-who' }, ev.player),
+      ev.card?.image ? h('img', { class: 'comic-source', src: ev.card.image, alt: ev.card.name }) : null);
+    onStage(el, ev.card ? 3400 : 2600);
+    if (ev.ann !== 'ok') chime(ev.ann === 'trigger' ? [660, 880, 1320] : [520, 780]);
+    return;
+  }
   const el = h('div', { class: `announce ann-${ev.ann}`, style: { '--pc': ev.color } },
     h('div', { class: 'announce-icon' }, ANN_ICON[ev.ann] ?? '📣'),
     h('div', { class: 'announce-text' }, h('div', { class: 'announce-who' }, ev.player), h('div', { class: 'announce-what' }, ev.text)),

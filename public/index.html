@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>EDH Platform</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Barlow+Semi+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Bree+Serif&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -78,7 +78,7 @@
       <button id="btn-seat" class="btn small hidden" title="Agregar un asiento que controlas tú">+ Asiento</button>
       <div class="turn-box">
         <span class="muted">Turno <b id="turn-num">0</b>:</span> <b id="turn-player"></b>
-        <button id="btn-pass" class="btn small">Pasar turno</button>
+        <button id="phase-chip" class="chip phase-chip" title="Avanzar fase (Q)"></button>
       </div>
       <div class="spacer"></div>
       <div class="announce-btns">
@@ -243,6 +243,7 @@
   <div id="menu" class="menu hidden" role="menu"></div>
   <div id="toasts" class="toasts"></div>
   <div id="stage" class="stage" aria-live="polite"></div>
+  <svg id="arrows" class="arrows" aria-hidden="true"></svg>
 
   <script src="/socket.io/socket.io.js"></script>
   <script type="module" src="/app.js"></script>

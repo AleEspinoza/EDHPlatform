@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { randomInt } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { readdir } from 'node:fs/promises';
 import { Server } from 'socket.io';
 import { createRoom, addPlayer, removePlayer, applyAction, viewFor, log, GameError, gameRecord, hasGameInProgress } from './game.js';
 import { createHistory } from './history.js';
@@ -26,6 +27,19 @@ const app = express();
 if (process.env.TRUST_PROXY) app.set('trust proxy', 1); // detrás de Render/Railway/Fly
 app.use('/api', createApi({ db, auth, history, google }));
 app.use(express.static(path.join(__dirname, '..', 'public')));
+// Lista del arte disponible en public/assets, para que el cliente no tenga que adivinar.
+const ASSET_DIR = path.join(__dirname, '..', 'public', 'assets');
+app.get('/assets-manifest.json', async (_req, res) => {
+  const out = [];
+  const walk = async (dir, prefix) => {
+    for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+      if (entry.isDirectory()) await walk(path.join(dir, entry.name), `${prefix}${entry.name}/`);
+      else if (/\.(webp|png|jpe?g)$/i.test(entry.name)) out.push(`${prefix}${entry.name}`);
+    }
+  };
+  await walk(ASSET_DIR, '');
+  res.set('Cache-Control', 'no-cache').json({ files: out.sort() });
+});
 app.get('/health', (_req, res) => res.json({ ok: true, rooms: rooms.size }));
 
 const httpServer = createServer(app);

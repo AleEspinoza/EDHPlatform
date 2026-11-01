@@ -1,19 +1,20 @@
 # EDH Platform
 
-Versión 0.6
+Versión 0.7
 
 Mesa virtual de Commander/EDH con salas privadas, mazos importados y todas las acciones del juego en tiempo real.
 
 ## Qué incluye
 
-- **Estilo «Mesa del Archivo»**: mano en abanico que se levanta al pasar el mouse, retratos con el arte del comandante, gema de vida, cartas que caen al campo al jugarse y banner de turno.
+- **Estilo «Taberna»** (dirección Hearthstone): tapetes enmarcados sobre una mesa de taberna, marco de héroe con la gema de vida, zonas enmarcadas abajo a la derecha (mazo, cementerio, exilio, uno o dos comandantes), placa de «Pasar turno», bandeja de la mano con faroles y carteles de cómic animados para Trigger, Respondo, Espera, OK y Tu turno. Tipografía Bree Serif + Nunito.
 
 - **Salas privadas** con código de 6 caracteres y enlace de invitación (`/?sala=CODIGO`), hasta 6 jugadores.
 - **Reconexión**: si recargas o se cae la conexión, vuelves a tu asiento con tus cartas.
 - **Cuenta obligatoria para jugar**: entra con Google o con usuario y contraseña. En tu inicio están tus mazos, tus partidas pasadas y tus estadísticas (récord, % de victorias, turnos y duración media, y resultados por comandante).
 - **Terminar partida** eligiendo al ganador (o empate), con revancha opcional; queda en el historial de cada jugador. Si la sala se cierra a mitad de partida, se guarda como «sin terminar».
 - **Mazos guardados**: créalos desde el inicio o al cargarlos en una sala; jugar uno es un clic, sin volver a consultar Scryfall.
-- **Atajos de teclado reasignables** (tecla `K` o botón ⌨): `Espacio` pasa el turno, `D` roba, `U` endereza todo y acciones sobre la carta bajo el mouse (`T` girar, `P` jugar, `Supr` cementerio, `E` exilio, `H` mano, `A` tope de biblioteca…).
+- **Atajos idénticos a EDHPlay** y reasignables (tecla `I` o botón ⌨): `Espacio` pasar turno, `D` robar, `U` enderezar, `Q` avanzar fase, `M` maná, `V` ver biblioteca, `P`/`Shift+P` ver tope/fondo, `O` moneda, `N` ficha; sobre una carta `T` girar, `A` al campo, `G` cementerio, `E` exilio, `H` mano, `L`/`B` tope/fondo, `Z` boca abajo, `F` voltear, `X` copia, `W` flecha, `+`/`_` contadores, `Alt+1..4` fuerza/resistencia; `1–6` enfocar jugador y `7–0` reacciones.
+- **Selección múltiple** (Shift+clic o `Ctrl+A`), **flechas** entre cartas o hacia un jugador, **fases** del turno, **rastreador de maná** y **modificadores +X/+Y**.
 - **Importar desde Moxfield por link** (apagado por defecto; ver abajo).
 - **Importar mazo** pegando la lista (Moxfield, Archidekt, MTGO: `1 Sol Ring (C21) 263`). Imágenes desde Scryfall, cartas de dos caras con transformar.
 - **Zonas**: biblioteca, mano, campo de batalla, cementerio, exilio y zona de mando.
@@ -69,7 +70,11 @@ Moxfield no tiene API pública ni login para apps externas, y sus términos proh
 - **Arrastrar** entre mano, campo y zonas. Si sueltas sobre la biblioteca queda al tope; con Shift, al fondo.
 - **Clic** en una carta del campo la gira. **Doble clic** en la mano la juega.
 - **Clic derecho** en una carta, la biblioteca o el campo abre todas las acciones.
-- **Atajos**: lista completa y reasignable con `K`. Principales: `Espacio` pasar turno · `D` robar · `U` enderezar todo · `R` respondo · `G` trigger · sobre una carta: `T` girar, `P` jugar, `F` boca abajo, `+`/`-` contadores, `Supr` cementerio.
+- **Atajos**: lista completa y reasignable con `I` (por defecto los de EDHPlay). Principales: `Espacio` pasar turno · `D` robar · `U` enderezar todo · `R` respondo · `G` trigger · sobre una carta: `T` girar, `P` jugar, `F` boca abajo, `+`/`-` contadores, `Supr` cementerio.
+
+## Arte
+
+Las imágenes viven en `public/assets/` (`.webp` o `.png`) y son opcionales: el servidor publica la lista en `/assets-manifest.json` y la interfaz usa un respaldo dibujado con CSS para lo que falte. Los prompts para generar el resto están en el documento «Prompts de arte para EDH Platform».
 
 ## Arquitectura
 

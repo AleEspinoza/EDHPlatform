@@ -786,3 +786,29 @@ body:has(#login:not(.hidden)) .rune-backdrop, body:has(#lobby:not(.hidden)) .run
 .topbar .logo-bar { height: 34px; }
 @media (max-width: 600px) { #login .lobby-card { margin-top: 140px; } .logo-hero { top: -150px; } }
 @media (prefers-reduced-motion: reduce) { .rune-ring, .embers i, .logo-hero, .logo-hero::after { animation: none !important; } .embers { display: none; } }
+
+/* ---------- Refinamiento del logo y la portada ---------- */
+#login .lobby-card { margin-top: 210px; }
+.logo-hero { top: -262px; width: min(700px, 150%, calc(100vw - 24px)); }
+/* Destello que recorre la placa: el brillo se recorta con la forma del logo */
+.logo-hero::before {
+  content: ''; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(105deg, transparent 38%, rgba(255,236,190,.0) 42%, rgba(255,236,190,.55) 50%, rgba(255,236,190,0) 58%, transparent 62%) -160% 0 / 250% 100% no-repeat;
+  -webkit-mask: url(/assets/logo.webp) center / 100% 100% no-repeat; mask: url(/assets/logo.webp) center / 100% 100% no-repeat;
+  mix-blend-mode: soft-light; animation: logo-shine 7s ease-in-out 1.4s infinite;
+}
+@keyframes logo-shine { 0%, 62% { background-position: -160% 0; } 100% { background-position: 160% 0; } }
+/* Humo: dos nubes oscuras que se desplazan muy lento */
+.rune-backdrop::before, .rune-backdrop::after {
+  content: ''; position: absolute; width: 90vmax; aspect-ratio: 1; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(closest-side, rgba(150,135,120,.13), rgba(110,100,90,.06) 55%, transparent);
+  animation: smoke-drift 60s ease-in-out infinite alternate;
+}
+.rune-backdrop::before { left: -30vmax; top: -25vmax; }
+.rune-backdrop::after { right: -35vmax; bottom: -40vmax; animation-duration: 75s; animation-direction: alternate-reverse; }
+@keyframes smoke-drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(18vmax, 10vmax) scale(1.25); } }
+/* Barras: logo legible */
+.home-bar .logo-bar { height: 52px; }
+.topbar .logo-bar { height: 40px; }
+@media (max-width: 600px) { #login .lobby-card { margin-top: 150px; } .logo-hero { top: -170px; width: calc(100vw - 16px); } }
+@media (prefers-reduced-motion: reduce) { .logo-hero::before, .rune-backdrop::before, .rune-backdrop::after { animation: none !important; } }

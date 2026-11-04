@@ -385,6 +385,7 @@ function render() {
   $('#btn-copy').classList.toggle('hidden', state.solo);
   $('#solo-chip').classList.toggle('hidden', !state.solo);
   $('#btn-seat').classList.toggle('hidden', !state.solo);
+  $('#btn-end').textContent = state.solo ? 'Terminar práctica' : 'Terminar partida';
   $('#turn-num').textContent = state.turn;
   const active = playerById(state.activePlayerId);
   $('#turn-player').textContent = active?.name ?? '—';
@@ -1498,8 +1499,8 @@ $('#btn-copy').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(link); toast('Enlace copiado. Compártelo con tus rivales.'); }
   catch { prompt('Copia este enlace:', link); }
 });
-$('#btn-leave').addEventListener('click', async () => {
-  if (!confirm(state.solo ? '¿Terminar la práctica?' : '¿Salir de la sala? Perderás tu asiento y tus cartas.')) return;
+async function leaveRoom() {
+  if (!confirm(state.solo ? '¿Terminar la práctica y volver al inicio?' : '¿Salir de la sala? Perderás tu asiento y tus cartas.')) return;
   await emit('leaveRoom');
   store.del('edh.session');
   session = null;
@@ -1507,11 +1508,12 @@ $('#btn-leave').addEventListener('click', async () => {
   history.replaceState(null, '', '/');
   showScreen('lobby');
   loadHome();
-});
+}
+$('#btn-leave').addEventListener('click', leaveRoom);
 
 // ---------- Terminar partida ----------
 $('#btn-end').addEventListener('click', () => {
-  if (state.solo) return toast('Las prácticas en solitario no se guardan en el historial. Usa «Salir» para terminar.');
+  if (state.solo) return leaveRoom(); // la práctica no va al historial: terminar es salir
   const humans = state.players.filter((p) => !p.controlledBy);
   $('#end-players').replaceChildren(...humans.map((p) => h('button', {
     class: 'end-player', style: { '--pc': p.color },

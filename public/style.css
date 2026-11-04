@@ -858,3 +858,16 @@ body:has(#login:not(.hidden)) .rune-backdrop, body:has(#lobby:not(.hidden)) .run
 .guest-note { margin: 8px 0 0; text-align: center; }
 .guest-card h2 { margin: 0 0 8px; font: 24px var(--display); color: var(--gold); text-shadow: var(--outline); }
 .guest-card p { margin: 0 0 16px; color: var(--parch); line-height: 1.5; }
+
+/* Terminar y Salir quedan fijos a la derecha aunque la barra no quepa */
+.bar-exit { position: sticky; right: -14px; margin-left: auto; margin-right: -14px; display: flex; gap: 8px; padding: 0 14px 0 18px; align-self: stretch; align-items: center; background: linear-gradient(90deg, transparent, rgba(30,18,8,.96) 16px), var(--wood-grain); z-index: 2; }
+@media (max-width: 1500px) {
+  .topbar .ann .lbl, #btn-d20 .lbl { display: none; }
+  .topbar .ann { min-width: 38px; }
+}
+@media (max-width: 1400px) {
+  #solo-chip { display: none !important; } /* «Terminar práctica» ya dice que es solitario */
+}
+@media (max-width: 1150px) {
+  .topbar { gap: 6px; }
+}

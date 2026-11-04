@@ -102,20 +102,22 @@
       </div>
       <div class="spacer"></div>
       <div class="announce-btns">
-        <button class="btn small ann respond" data-ann="respond" title="Avisar que respondes (R o /respondo)">✋ Respondo</button>
-        <button class="btn small ann trigger" data-ann="trigger" title="Avisar que tienes un trigger (G o /trigger)">⚡ Trigger</button>
-        <button class="btn small ann wait" data-ann="wait" title="Pedir que esperen (/espera)">⏸ Espera</button>
-        <button class="btn small ann ok" data-ann="ok" title="Pasar / OK (/ok)">✓ OK</button>
+        <button class="btn small ann respond" data-ann="respond" title="Avisar que respondes (R o /respondo)">✋<span class="lbl"> Respondo</span></button>
+        <button class="btn small ann trigger" data-ann="trigger" title="Avisar que tienes un trigger (G o /trigger)">⚡<span class="lbl"> Trigger</span></button>
+        <button class="btn small ann wait" data-ann="wait" title="Pedir que esperen (/espera)">⏸<span class="lbl"> Espera</span></button>
+        <button class="btn small ann ok" data-ann="ok" title="Pasar / OK (/ok)">✓<span class="lbl"> OK</span></button>
       </div>
-      <button id="btn-d20" class="btn small ghost" title="Lanzar d20">🎲 d20</button>
+      <button id="btn-d20" class="btn small ghost" title="Lanzar d20">🎲<span class="lbl"> d20</span></button>
       <button id="btn-coin" class="btn small ghost" title="Lanzar moneda">🪙</button>
       <button id="btn-token" class="btn small ghost">+ Token</button>
       <button id="btn-deck" class="btn small">Mazo</button>
       <button id="btn-mat" class="btn small" title="Elegir tu tapete">Tapete</button>
-      <button id="btn-end" class="btn small">Terminar partida</button>
       <button id="btn-keys" class="btn small ghost" title="Atajos de teclado (K)">⌨</button>
       <button id="btn-help" class="btn small ghost" title="Ayuda">?</button>
-      <button id="btn-leave" class="btn small danger ghost">Salir</button>
+      <div class="bar-exit">
+        <button id="btn-end" class="btn small">Terminar partida</button>
+        <button id="btn-leave" class="btn small danger" title="Salir de la sala y volver al inicio">⏏ Salir</button>
+      </div>
     </header>
 
     <div class="layout">

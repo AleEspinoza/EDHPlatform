@@ -41,7 +41,7 @@ app.get('/assets-manifest.json', async (_req, res) => {
   await walk(ASSET_DIR, '');
   res.set('Cache-Control', 'no-cache').json({ files: out.sort() });
 });
-app.get('/health', (_req, res) => res.json({ ok: true, rooms: rooms.size }));
+app.get('/health', (_req, res) => res.json({ ok: true, rooms: rooms.size, db: db.info.remote ? 'turso' : 'local' }));
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, { maxHttpBufferSize: 2e6 });

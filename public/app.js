@@ -90,6 +90,10 @@ function showScreen(name) {
 
 async function enterRoom(res) {
   if (!res?.ok) {
+    if (res?.code === 'login' && guest) { // servidor antiguo, a medio actualizar
+      $('#lobby-error').textContent = 'El servidor se está actualizando. Recarga la página en un minuto.';
+      return false;
+    }
     if (res?.code === 'login') return showScreen('login'), false;
     $('#lobby-error').textContent = res?.error ?? 'No se pudo entrar';
     return false;

@@ -86,8 +86,11 @@ io.use(async (socket, next) => {
     next(new Error('sesión'));
   }
 });
-const displayName = (socket) => socket.data.user.displayName || socket.data.user.username;
-const LOGIN_REQUIRED = { ok: false, error: 'Inicia sesión para jugar', code: 'login' };
+/** Nombre en la mesa: el de la cuenta o, para invitados, el que escribieron. */
+const displayName = (socket, guestName) => socket.data.user
+  ? socket.data.user.displayName || socket.data.user.username
+  : String(guestName ?? '').trim().slice(0, 24) || 'Invitado';
+const userIdOf = (socket) => socket.data.user?.id ?? null;
 
 /** Cierra una sala guardando como «sin terminar» la partida que estuviera en curso. */
 /** Guarda una partida en el historial en segundo plano. */
@@ -101,27 +104,27 @@ function closeRoom(room) {
 }
 
 io.on('connection', (socket) => {
-  socket.on('createRoom', ({ solo } = {}, ack) => {
-    if (!socket.data.user) return reply(ack, LOGIN_REQUIRED);
+  socket.on('createRoom', ({ solo, name } = {}, ack) => {
     const room = createRoom(newCode(), { solo: Boolean(solo) });
     rooms.set(room.code, room);
-    const player = addPlayer(room, displayName(socket), { userId: socket.data.user.id });
+    const player = addPlayer(room, displayName(socket, name), { userId: userIdOf(socket) });
     seat(socket, room, player);
     reply(ack, { ok: true, code: room.code, playerId: player.id, token: player.token });
     broadcast(room);
   });
 
-  socket.on('joinRoom', ({ code, token } = {}, ack) => {
-    if (!socket.data.user) return reply(ack, LOGIN_REQUIRED);
+  socket.on('joinRoom', ({ code, token, name } = {}, ack) => {
     const room = rooms.get(String(code ?? '').toUpperCase().trim());
     if (!room) return reply(ack, { ok: false, error: 'No existe una sala con ese código' });
     try {
       // Reconexión: con el token del asiento, o porque la cuenta ya está sentada en la sala.
-      let player = (token && room.players.find((p) => p.token === token && (!p.userId || p.userId === socket.data.user.id)))
-        || room.players.find((p) => p.userId === socket.data.user.id && !p.controlledBy);
+      // Un invitado solo recupera asientos de invitado; una cuenta, los suyos o los de invitado.
+      const uid = userIdOf(socket);
+      let player = (token && room.players.find((p) => p.token === token && (!p.userId || p.userId === uid)))
+        || (uid ? room.players.find((p) => p.userId === uid && !p.controlledBy) : null);
       if (player) log(room, `${player.name} se reconectó`);
       else if (room.solo) return reply(ack, { ok: false, error: 'Esa sala es una partida de práctica privada' });
-      else player = addPlayer(room, displayName(socket), { userId: socket.data.user.id });
+      else player = addPlayer(room, displayName(socket, name), { userId: uid });
       seat(socket, room, player);
       reply(ack, { ok: true, code: room.code, playerId: player.id, token: player.token });
       broadcast(room);

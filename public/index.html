@@ -39,6 +39,12 @@
         <button id="btn-acc" class="btn primary wide">Entrar</button>
         <p id="acc-error" class="error small" role="alert"></p>
       </form>
+      <div class="divider"><span>o sin cuenta</span></div>
+      <form id="guest-form" class="join-row">
+        <input id="guest-name" maxlength="24" placeholder="Tu nombre en la mesa" autocomplete="nickname" aria-label="Tu nombre en la mesa" />
+        <button id="btn-guest" class="btn">Jugar sin cuenta</button>
+      </form>
+      <p class="muted small guest-note">Sin cuenta no se guardan tus mazos ni tu historial.</p>
     </div>
   </section>
 
@@ -62,7 +68,12 @@
         </div>
         <p id="lobby-error" class="error" role="alert"></p>
       </section>
-      <section class="home-account">
+      <section id="home-guest" class="home-account guest-card hidden">
+        <h2>Juegas como invitado</h2>
+        <p>Puedes crear salas, unirte y practicar solo. Con una cuenta, además, guardas tus mazos para cargarlos con un clic y queda tu historial de partidas con estadísticas.</p>
+        <button id="btn-guest-account" class="btn primary">Crear cuenta o iniciar sesión</button>
+      </section>
+      <section id="home-account" class="home-account">
         <nav class="tabs" role="tablist">
           <button role="tab" data-tab="decks" class="on">Mis mazos</button>
           <button role="tab" data-tab="games">Partidas</button>

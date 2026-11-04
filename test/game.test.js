@@ -109,7 +109,7 @@ test('peek devuelve el tope primero', () => {
   assert.equal(res.private.cards[0].iid, top.iid);
 });
 
-test('partida por sockets: exige cuenta, crear sala, unirse, reconectar, terminar y guardar historial', async () => {
+test('partida por sockets: invitados, crear sala, unirse, reconectar, terminar y guardar historial', async () => {
   httpServer.listen(0);
   await once(httpServer, 'listening');
   const url = `http://localhost:${httpServer.address().port}`;
@@ -124,8 +124,12 @@ test('partida por sockets: exige cuenta, crear sala, unirse, reconectar, termina
   const s1 = connect(url, { transports: ['websocket'], extraHeaders: { Cookie: cookieA } });
   const s2 = connect(url, { transports: ['websocket'], extraHeaders: { Cookie: cookieB } });
   try {
-    const denied = await emit(anon, 'createRoom', {});
-    assert.equal(denied.code, 'login', 'sin cuenta no se puede jugar');
+    const guestStateP = once(anon, 'state');
+    const guestRoom = await emit(anon, 'createRoom', { solo: true, name: '  Invitada  ' });
+    assert.equal(guestRoom.ok, true, 'se puede jugar sin cuenta');
+    const [guestState] = await guestStateP;
+    assert.equal(guestState.players[0].name, 'Invitada');
+    await emit(anon, 'leaveRoom');
 
     const created = await emit(s1, 'createRoom', {});
     assert.equal(created.ok, true);
@@ -165,6 +169,10 @@ test('partida por sockets: exige cuenta, crear sala, unirse, reconectar, termina
     assert.equal(stats.stats.wins, 1);
     assert.equal(stats.stats.winRate, 1);
     assert.equal(stats.stats.byCommander[0].commanders, "K'rrik");
+
+    const intruder = await emit(anon, 'joinRoom', { code: created.code, token: created.token, name: 'Intrusa' });
+    assert.equal(intruder.ok, true);
+    assert.notEqual(intruder.playerId, created.playerId, 'un invitado no toma el asiento de una cuenta aunque tenga su token');
     s3.disconnect();
   } finally {
     anon.disconnect();

@@ -850,3 +850,10 @@ body:has(#login:not(.hidden)) .rune-backdrop, body:has(#lobby:not(.hidden)) .run
 .topbar .logo-bar { height: 40px; }
 @media (max-width: 600px) { #login .lobby-card { margin-top: 150px; } .logo-hero { top: -170px; width: calc(100vw - 16px); } }
 @media (prefers-reduced-motion: reduce) { .logo-hero::before, .rune-backdrop::before, .rune-backdrop::after { animation: none !important; } }
+
+/* Jugar sin cuenta */
+#guest-form { margin-top: 2px; }
+#guest-form input { flex: 1; min-width: 0; }
+.guest-note { margin: 8px 0 0; text-align: center; }
+.guest-card h2 { margin: 0 0 8px; font: 24px var(--display); color: var(--gold); text-shadow: var(--outline); }
+.guest-card p { margin: 0 0 16px; color: var(--parch); line-height: 1.5; }

@@ -64,6 +64,8 @@ let targeting = null; // { iid, pid, name } mientras se elige a qué adjuntar
 let deckFor = null; // asiento al que se le carga el mazo
 let tokenFor = null; // { pid, x, y } para el modal de tokens
 let account = null; // { id, username } si hay sesión
+let guest = store.get('edh.guest', null); // { name } si juega sin cuenta
+const guestName = () => (account ? undefined : guest?.name);
 let editingDeck = null; // id del mazo guardado que se está editando
 let moxEnabled = null; // importador de Moxfield disponible en el servidor
 
@@ -100,11 +102,11 @@ async function enterRoom(res) {
 }
 
 socket.on('connect', async () => {
-  if (!account) return; // sin sesión no hay sala a la cual volver
+  if (!account && !guest) return; // sin cuenta ni invitado no hay sala a la cual volver
   // Reconexión automática al asiento si había sesión en esta sala.
   const urlCode = new URLSearchParams(location.search).get('sala')?.toUpperCase();
   if (session?.token && (!urlCode || urlCode === session.code)) {
-    const res = await emit('joinRoom', { code: session.code, token: session.token });
+    const res = await emit('joinRoom', { code: session.code, token: session.token, name: guestName() });
     if (!(await enterRoom(res))) {
       store.del('edh.session');
       session = null;
@@ -156,15 +158,20 @@ async function api(method, path, body) {
 // ---------- Cuenta ----------
 let accMode = 'login';
 function renderAccount() {
-  $('#acc-name').textContent = account?.displayName ?? account?.username ?? '';
+  const isGuest = !account && Boolean(guest);
+  $('#acc-name').textContent = account?.displayName ?? account?.username ?? (isGuest ? `${guest.name} (invitado)` : '');
+  $('#btn-logout').textContent = isGuest ? 'Salir' : 'Cerrar sesión';
+  $('#home-guest').classList.toggle('hidden', !isGuest);
+  $('#home-account').classList.toggle('hidden', isGuest);
   const av = $('#me-avatar');
   av.style.backgroundImage = account?.avatar ? `url("${account.avatar}")` : '';
-  av.textContent = account?.avatar ? '' : (account?.displayName ?? account?.username ?? '?').slice(0, 1).toUpperCase();
+  av.textContent = account?.avatar ? '' : (account?.displayName ?? account?.username ?? guest?.name ?? '?').slice(0, 1).toUpperCase();
 }
 async function refreshAccount() {
   try { account = (await api('GET', '/auth/me')).user; } catch { account = null; }
+  if (account && guest) { guest = null; store.del('edh.guest'); }
   renderAccount();
-  if (!account) return showScreen('login');
+  if (!account && !guest) return showScreen('login');
   if ($('#room').classList.contains('hidden')) {
     showScreen('lobby');
     loadHome();
@@ -209,24 +216,37 @@ $('#acc-form').addEventListener('submit', async (e) => {
   }
 });
 $('#btn-logout').addEventListener('click', async () => {
-  await api('POST', '/auth/logout', {}).catch(() => {});
+  if (account) await api('POST', '/auth/logout', {}).catch(() => {});
   account = null;
+  guest = null;
+  store.del('edh.guest');
   store.del('edh.session');
   session = null;
   renderAccount();
   showScreen('login');
   reconnectQuietly();
 });
+$('#guest-name').value = guest?.name ?? store.get('edh.guest.last', '');
+$('#guest-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = $('#guest-name').value.trim().slice(0, 24);
+  if (!name) return $('#guest-name').focus();
+  guest = { name };
+  store.set('edh.guest', guest);
+  store.set('edh.guest.last', name);
+  refreshAccount();
+});
+$('#btn-guest-account').addEventListener('click', () => { showScreen('login'); $('#acc-user').focus(); });
 initLogin();
 refreshAccount();
 
 // ---------- Inicio: jugar ----------
-$('#btn-create').addEventListener('click', async () => enterRoom(await emit('createRoom', {})));
-$('#btn-solo').addEventListener('click', async () => enterRoom(await emit('createRoom', { solo: true })));
+$('#btn-create').addEventListener('click', async () => enterRoom(await emit('createRoom', { name: guestName() })));
+$('#btn-solo').addEventListener('click', async () => enterRoom(await emit('createRoom', { solo: true, name: guestName() })));
 async function join() {
   const code = $('#lobby-code').value.trim().toUpperCase();
   if (code.length !== 6) return ($('#lobby-error').textContent = 'El código tiene 6 caracteres');
-  enterRoom(await emit('joinRoom', { code }));
+  enterRoom(await emit('joinRoom', { code, name: guestName() }));
 }
 $('#btn-join').addEventListener('click', join);
 $('#lobby-code').addEventListener('keydown', (e) => e.key === 'Enter' && join());
@@ -242,6 +262,7 @@ document.querySelectorAll('.tabs [data-tab]').forEach((b) => b.addEventListener(
 $('#btn-new-deck').addEventListener('click', () => openDeckModal(null));
 
 function loadHome() {
+  if (!account) return; // los invitados no tienen mazos ni historial guardados
   if (homeTab === 'decks') return renderHomeDecks();
   if (homeTab === 'games') return renderHomeGames();
   return renderHomeStats();

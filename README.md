@@ -4,6 +4,8 @@ Versión 0.9
 
 Mesa virtual de Commander/EDH con salas privadas, mazos importados y todas las acciones del juego en tiempo real.
 
+> Objetivo, decisiones y cronología: [docs/BITACORA.md](docs/BITACORA.md) · Lo que sigue: [docs/PROXIMOS-PASOS.md](docs/PROXIMOS-PASOS.md)
+
 ## Qué incluye
 
 - **Estilo «Taberna»** (dirección Hearthstone): tapetes enmarcados sobre una mesa de taberna, marco de héroe con la gema de vida, zonas enmarcadas abajo a la derecha (mazo, cementerio, exilio, uno o dos comandantes), placa de «Pasar turno», bandeja de la mano con faroles y carteles de cómic animados para Trigger, Respondo, Espera, OK y Tu turno. Tipografía Bree Serif + Nunito.

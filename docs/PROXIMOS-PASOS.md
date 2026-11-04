@@ -61,15 +61,32 @@ Los prompts están en el documento «Prompts de arte para EDH Platform».
 - Gema de vida
 - Pila de cartas del mazo, sin el logo de Hearthstone
 
-## 6. Jugar contra una IA (el objetivo ambicioso)
+## 6. Jugar contra una IA (prioridad media, en etapa de idea)
 
-| Camino | Cómo juega | Esfuerzo |
-| --- | --- | --- |
-| Bot con modelo de lenguaje sobre la mesa actual | Lee el texto de las cartas y usa las mismas acciones que un humano; puede cometer errores de reglas; cada partida tiene costo de API | Semanas |
-| Integrar la IA de Forge (código abierto) | Reglas correctas, juego decente pero no excelente; licencia GPL | Medio, como modo aparte |
-| Motor de reglas propio con búsqueda | El único camino a «excelente» | Años |
+**Premisa:** practicar cEDH contra una IA. En vez de un motor de reglas, un **agente** con un modelo de lenguaje actual, con las herramientas y skills adecuadas, que tome decisiones parecidas a las de un jugador competitivo. Todavía es una idea para iterar, no un plan comprometido.
 
-Recomendación: prototipar el bot con modelo de lenguaje en el modo solitario, que ya tiene asientos controlables, y medir qué tan bien juega con Blue Farm antes de decidir.
+**Por qué puede funcionar en cEDH:** el metajuego es estrecho y las líneas de victoria están documentadas, así que el agente pilota un mazo con un plan explícito. Además, el modelo lee el texto de las cartas y el servidor ya filtra la información oculta, de modo que el agente ve lo mismo que un humano.
+
+**Riesgos:** cálculo exacto (maná, storm, combos) → se resuelve con herramientas; no hay pila ni prioridad formal en la mesa; latencia y costo por cada ventana de respuesta → se resuelve con un filtro que solo despierta al modelo cuando importa; reglas raras (capas, reemplazos).
+
+**Cómo se armaría:**
+
+| Pieza | Qué es |
+| --- | --- |
+| Pila y prioridad en el motor | Lanzar «a la pila», pasar prioridad, resolver. También cierra la paridad con EDHPlay (el atajo `K`) y sirve a los humanos |
+| Herramientas del agente | Leer el estado, leer el texto de una carta y las mismas acciones de un humano (robar, girar, lanzar, mover), más «responder» y «pasar» |
+| Calculadora de combos y maná | Código que responde «¿puedo ganar ahora con esto?» y «¿qué secuencia me deja el maná justo?» para las líneas del mazo |
+| Skill por mazo | El plan escrito del mazo: líneas de victoria, criterios de mulligan, qué interacción guardar y para qué, cuándo ser el que frena a la mesa |
+| Bucle del agente en el servidor | Usa la API de Claude con esas herramientas. Requiere una clave de API y cada partida tiene un costo |
+| Registro de decisiones | Cada decisión con su razonamiento, para evaluar si jugó como un jugador competitivo y ajustar la skill |
+
+**Por dónde partir:** 1 contra 1 contra un agente que pilota un solo mazo de cEDH. Después, mesa de 4 con tres agentes (tres veces el costo, más juego político).
+
+**Expectativa:** con la calculadora y una buena skill, un jugador competente que conoce bien su mazo; le costará leer la mano rival y las decisiones finas de mesa.
+
+**Preguntas abiertas:** qué mazo pilota primero el agente; si practicas con tu mazo contra él o lo miras jugar para aprender las líneas.
+
+Alternativas descartadas por ahora: integrar la IA de Forge (reglas correctas pero juego mediocre, licencia GPL) y un motor de reglas propio con búsqueda (años de trabajo).
 
 ## 7. Moxfield
 

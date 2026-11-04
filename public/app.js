@@ -818,8 +818,8 @@ function renderHand() {
   }, s.id === state.you ? 'Tú' : s.name)) : []));
   const n = hand.length;
   const width = $('#hand').clientWidth || 900;
-  const cw = 112;
-  const gap = n > 1 ? Math.min(cw * 0.78, (width - cw - 40) / (n - 1)) : 0;
+  const cw = (innerWidth <= 900 ? 104 : 148) * cardScale; // igual que --cw en style.css
+  const gap = n > 1 ? Math.min(cw * 0.7, (width - cw - 120) / (n - 1)) : 0;
   // Cada carta va dentro de un «hueco» quieto que detecta el mouse; la carta se levanta
   // dentro de él sin que el área de detección se mueva (así no parpadea).
   $('#hand').replaceChildren(...hand.map((c, i) => {

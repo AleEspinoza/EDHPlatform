@@ -406,7 +406,7 @@ html.has-zones-command .pile[data-pile=command]::after { background-image: var(-
 
 /* ---------- Mano: bandeja de madera con abanico ---------- */
 #hand-wrap {
-  position: relative; z-index: 20; flex: 0 0 auto; height: 136px; margin: 0 -12px;
+  --tray-h: 188px; position: relative; z-index: 20; flex: 0 0 auto; height: var(--tray-h); margin: 0 -12px;
   background: var(--a-hand-tray, var(--wood-grain)) center bottom / 100% 100% no-repeat;
   border-top: 3px solid var(--gold-lo); box-shadow: 0 -6px 16px rgba(0,0,0,.45);
 }
@@ -415,9 +415,9 @@ html.has-hand-tray #hand-wrap { border-top: 0; box-shadow: none; background-colo
 .hand-tabs { display: inline-flex; gap: 4px; margin-left: 8px; }
 .hand-tabs button { font: 13px var(--display); color: #fff; text-shadow: var(--outline); background: rgba(0,0,0,.4); border: 2px solid var(--gold-lo); border-radius: 999px; padding: 0 10px; cursor: pointer; }
 .hand-tabs button.on { background: var(--pc, var(--gold)); }
-#hand { --cw: calc(112px * var(--scale)); position: absolute; inset: 0; overflow: visible; }
+#hand { --cw: calc(148px * var(--scale)); position: absolute; inset: 0; overflow: visible; }
 #hand .hand-slot {
-  position: absolute; bottom: -50px; width: var(--cw); aspect-ratio: 63 / 88;
+  position: absolute; bottom: -22px; width: var(--cw); aspect-ratio: 63 / 88;
   left: calc(50% - var(--cw) / 2 + var(--off) * var(--gap));
   transform-origin: 50% 120%; transform: translateY(var(--drop)) rotate(var(--rot));
   transition: translate .18s ease;
@@ -429,11 +429,11 @@ html.has-hand-tray #hand-wrap { border-top: 0; box-shadow: none; background-colo
 /* El hueco no se mueve (sigue bajo el mouse); la carta sube, se endereza y crece */
 #hand .hand-slot:hover { z-index: 200 !important; }
 #hand .hand-slot:hover .card {
-  transform: translateY(-46px) rotate(calc(-1 * var(--rot))) scale(1.6); transition-duration: .14s;
+  transform: translateY(-40px) rotate(calc(-1 * var(--rot))) scale(1.4); transition-duration: .14s;
   box-shadow: 0 0 0 3px var(--green), 0 0 34px rgba(91,227,90,.6), 0 26px 42px rgba(0,0,0,.6);
 }
-#hand .hand-slot:hover ~ .hand-slot { translate: 46px 0; }
-#hand .hand-slot:has(~ .hand-slot:hover) { translate: -46px 0; }
+#hand .hand-slot:hover ~ .hand-slot { translate: 54px 0; }
+#hand .hand-slot:has(~ .hand-slot:hover) { translate: -54px 0; }
 #hand:empty::after { content: 'Tu mano está vacía'; position: absolute; bottom: 40px; left: 0; right: 0; text-align: center; color: var(--parch-dim); font: 16px var(--display); }
 
 /* ---------- Lateral ---------- */
@@ -598,7 +598,8 @@ html.has-ui-d20 .die { border-radius: 0; box-shadow: none; background-color: tra
   .layout { grid-template-columns: 1fr; }
   .side { display: none; }
   body { overflow: auto; }
-  #hand { --cw: calc(88px * var(--scale)); }
+  #hand { --cw: calc(104px * var(--scale)); }
+  #hand-wrap { --tray-h: 136px; }
   .home { grid-template-columns: 1fr; padding: 16px; }
   .game-row { grid-template-columns: 1fr; }
   .game-meta { text-align: left; }
@@ -638,7 +639,7 @@ html.has-ui-end-turn .end-turn.ready { color: var(--gold-hi); filter: drop-shado
 
 /* Bandeja de la mano: se ve la repisa frontal con los faroles */
 /* Bandeja: los extremos (faroles) a escala real; solo se estira el tramo central */
-html.has-hand-tray #hand-wrap { background: none; border-style: solid; border-width: 0; border-image: var(--a-hand-tray) 0 330 fill / 0 calc(136px * 330 / 430) stretch; }
+html.has-hand-tray #hand-wrap { background: none; border-style: solid; border-width: 0; border-image: var(--a-hand-tray) 0 330 fill / 0 calc(var(--tray-h) * 330 / 430) stretch; }
 html.has-mats-tavern .mat { box-shadow: none; border-radius: 6px; background-size: 100% 100%; }
 html.has-mats-tavern .mat .battlefield { margin: 2.2% 2.6%; }
 

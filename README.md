@@ -63,6 +63,7 @@ En local, copia `.env.example` como `.env` y complétalo; `npm start` lo carga s
 |---|---|
 | `PORT` | Puerto HTTP (3000 por defecto) |
 | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Base persistente en [Turso](https://turso.tech). Sin ellas se usa un archivo local |
+| `DEMO_USER`, `DEMO_PASSWORD` | Cuenta de prueba fija: se crea al arrancar (o se le repone la contraseña) |
 | `DB_FILE` | Ruta del archivo local (por defecto `data/edhplatform.db`) |
 | `NODE_ENV=production` | Cookies de sesión con `Secure` (requiere HTTPS) |
 | `TRUST_PROXY=1` | Detrás de un proxy (Render, Railway, Fly) |

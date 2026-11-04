@@ -43,6 +43,7 @@ export function createAuth(db) {
   const q = {
     insertUser: db.prepare('INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)'),
     userByName: db.prepare('SELECT * FROM users WHERE username = ?'),
+    setPassword: db.prepare('UPDATE users SET password_hash = ? WHERE id = ?'),
     insertSession: db.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)'),
     sessionUser: db.prepare(`SELECT u.id, u.username, u.display_name, u.avatar_url FROM sessions s JOIN users u ON u.id = s.user_id
                              WHERE s.token_hash = ? AND s.expires_at > ?`),
@@ -127,6 +128,18 @@ export function createAuth(db) {
     },
     async logout(token) {
       if (token) await q.deleteSession.run(sha256(token));
+    },
+    /**
+     * Cuenta de prueba fija (DEMO_USER / DEMO_PASSWORD). Se crea al arrancar, o se le
+     * repone la contraseña si ya existe. No pasa por las reglas de registro.
+     */
+    async seedUser(username, password) {
+      username = String(username ?? '').trim();
+      if (!username || !password) return null;
+      const row = await q.userByName.get(username);
+      if (row) await q.setPassword.run(hashPassword(String(password)), row.id);
+      else await q.insertUser.run(username, hashPassword(String(password)), Date.now());
+      return publicUser(await q.userByName.get(username));
     },
     async purge() {
       await q.purgeSessions.run(Date.now());

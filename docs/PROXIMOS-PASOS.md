@@ -9,6 +9,7 @@ El código ya está listo; esto solo lo puedes hacer tú, porque las cuentas deb
 - [ ] **Turso:** crear cuenta en turso.tech (con GitHub), crear una base y copiar su URL y un token
 - [ ] **Google:** crear las credenciales en Google Cloud (pasos en la sección 2). Agregar como redirect `https://edhplatform.onrender.com/api/auth/google/callback`
 - [ ] **Render:** en **Environment**, cargar `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`
+- [ ] **Cuenta de prueba (opcional):** en Render, `DEMO_USER=adm` y `DEMO_PASSWORD` con la contraseña que quieras. Se crea sola al arrancar
 - [ ] **Comprobar:** abrir `https://edhplatform.onrender.com/health` y ver `"db":"turso"`
 
 ## 1. Que las cuentas persistan (base de datos externa)

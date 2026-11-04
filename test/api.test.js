@@ -200,3 +200,13 @@ test('Google: sin configurar, el botón responde 501 y providers lo indica', asy
   assert.equal((await fetch(`${base}/api/auth/providers`).then((r) => r.json())).google, false);
   assert.equal((await fetch(`${base}/api/auth/google`, { redirect: 'manual' })).status, 501);
 });
+
+test('cuenta de prueba: se crea sin reglas de registro y se puede reponer la contraseña', async () => {
+  const auth = createAuth(await openDb(':memory:'));
+  const user = await auth.seedUser('adm', '123');
+  assert.equal(user.username, 'adm');
+  assert.equal((await auth.login('adm', '123')).user.id, user.id);
+  await auth.seedUser('adm', 'otra');
+  await assert.rejects(auth.login('adm', '123'), /incorrectos/);
+  assert.equal((await auth.login('adm', 'otra')).user.id, user.id, 'misma cuenta, nueva contraseña');
+});

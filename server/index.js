@@ -21,6 +21,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const db = await openDb();
 console.log(`Base de datos: ${db.info.remote ? `Turso (${new URL(db.info.url).host})` : 'archivo local'}`);
 const auth = createAuth(db);
+if (process.env.DEMO_USER && process.env.DEMO_PASSWORD) {
+  const demo = await auth.seedUser(process.env.DEMO_USER, process.env.DEMO_PASSWORD);
+  console.log(`Cuenta de prueba lista: ${demo.username}`);
+}
 const history = createHistory(db);
 const gConfig = googleConfig();
 const google = gConfig ? createGoogleFlow(gConfig) : null;

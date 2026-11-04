@@ -56,13 +56,13 @@ export function createAuth(db) {
   const publicUser = (row) => ({ id: row.id, username: row.username, displayName: row.display_name || row.username, avatar: row.avatar_url || null });
 
   /** Nombre de usuario único a partir del nombre o correo de Google. */
-  function freeUsername(profile) {
+  async function freeUsername(profile) {
     const base = (profile.name || profile.email?.split('@')[0] || 'jugador')
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 16) || 'jugador';
     const seed = base.length >= 3 ? base : `${base}_mtg`;
     for (let i = 0; i < 1000; i++) {
       const candidate = i === 0 ? seed : `${seed.slice(0, 16)}${i + 1}`;
-      if (!q.userByName.get(candidate)) return candidate;
+      if (!await q.userByName.get(candidate)) return candidate;
     }
     return `jugador_${randomBytes(4).toString('hex')}`;
   }
@@ -79,24 +79,24 @@ export function createAuth(db) {
     return entry;
   }
 
-  function startSession(userId) {
+  async function startSession(userId) {
     const token = randomBytes(32).toString('base64url');
     const now = Date.now();
-    q.insertSession.run(sha256(token), userId, now, now + SESSION_DAYS * 86400e3);
+    await q.insertSession.run(sha256(token), userId, now, now + SESSION_DAYS * 86400e3);
     return token;
   }
 
   return {
-    register(username, password) {
+    async register(username, password) {
       validateCredentials(username, password);
-      if (q.userByName.get(username)) throw new AuthError('Ese nombre de usuario ya existe', 409);
-      const { lastInsertRowid } = q.insertUser.run(username, hashPassword(password), Date.now());
+      if (await q.userByName.get(username)) throw new AuthError('Ese nombre de usuario ya existe', 409);
+      const { lastInsertRowid } = await q.insertUser.run(username, hashPassword(password), Date.now());
       const user = { id: Number(lastInsertRowid), username, displayName: username, avatar: null };
-      return { user, token: startSession(user.id) };
+      return { user, token: await startSession(user.id) };
     },
-    login(username, password, ip = '') {
+    async login(username, password, ip = '') {
       const entry = checkRate(`${ip}|${String(username).toLowerCase()}`);
-      const row = typeof username === 'string' ? q.userByName.get(username) : null;
+      const row = typeof username === 'string' ? await q.userByName.get(username) : null;
       // Se verifica igual aunque no exista el usuario, para no revelar cuáles existen por tiempo.
       const ok = verifyPassword(String(password ?? ''), row?.password_hash || DUMMY_HASH) && row?.password_hash && row;
       if (!ok) {
@@ -104,32 +104,32 @@ export function createAuth(db) {
         throw new AuthError('Usuario o contraseña incorrectos', 401);
       }
       attempts.delete(`${ip}|${String(username).toLowerCase()}`);
-      return { user: publicUser(row), token: startSession(row.id) };
+      return { user: publicUser(row), token: await startSession(row.id) };
     },
-    userFromToken(token) {
+    async userFromToken(token) {
       if (!token) return null;
-      const row = q.sessionUser.get(sha256(token), Date.now());
+      const row = await q.sessionUser.get(sha256(token), Date.now());
       return row ? publicUser(row) : null;
     },
     /** Entra (o crea la cuenta) con un perfil ya verificado de Google. */
-    googleLogin(profile) {
-      let row = q.userByGoogle.get(profile.sub);
+    async googleLogin(profile) {
+      let row = await q.userByGoogle.get(profile.sub);
       if (row) {
-        q.updateGoogleProfile.run(profile.email, profile.picture, profile.name, row.id);
-        row = q.userByGoogle.get(profile.sub);
+        await q.updateGoogleProfile.run(profile.email, profile.picture, profile.name, row.id);
+        row = await q.userByGoogle.get(profile.sub);
       } else {
-        const username = freeUsername(profile);
-        const { lastInsertRowid } = q.insertGoogleUser.run(username, Date.now(), profile.email, profile.sub, profile.picture, profile.name || username);
-        row = q.userByName.get(username);
+        const username = await freeUsername(profile);
+        const { lastInsertRowid } = await q.insertGoogleUser.run(username, Date.now(), profile.email, profile.sub, profile.picture, profile.name || username);
+        row = await q.userByName.get(username);
         if (Number(lastInsertRowid) !== row.id) throw new AuthError('No se pudo crear la cuenta', 500);
       }
-      return { user: publicUser(row), token: startSession(row.id) };
+      return { user: publicUser(row), token: await startSession(row.id) };
     },
-    logout(token) {
-      if (token) q.deleteSession.run(sha256(token));
+    async logout(token) {
+      if (token) await q.deleteSession.run(sha256(token));
     },
-    purge() {
-      q.purgeSessions.run(Date.now());
+    async purge() {
+      await q.purgeSessions.run(Date.now());
     },
   };
 }

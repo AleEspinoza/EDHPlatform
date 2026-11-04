@@ -1,6 +1,6 @@
 # EDH Platform — estado y bitácora
 
-Mesa virtual de Commander (EDH) inspirada en EDHPlay, con mejoras propias. Al 3 de noviembre de 2026 va en la **versión 0.9**: 17 commits y 35 pruebas automáticas que pasan.
+Mesa virtual de Commander (EDH) inspirada en EDHPlay, con mejoras propias. Al 3 de noviembre de 2026 va en la **versión 0.10**: 18 commits y 35 pruebas automáticas que pasan.
 
 - **Repo:** [github.com/AleEspinoza/EDHPlatform](https://github.com/AleEspinoza/EDHPlatform) (público, rama `main`)
 - **Correr en local:** `npm install && npm start` → `http://localhost:3000` (requiere Node 22.13 o superior)
@@ -35,6 +35,7 @@ Tener una plataforma propia para jugar Commander en línea con amigos, con **tod
 | Atajos | Idénticos a los de EDHPlay por defecto y reasignables (tecla `I`) |
 | Solitario | Práctica con asientos extra que controlas tú |
 | Estilo | Taberna tipo Hearthstone en la mesa; portada «Placa rúnica» con el logo; tapetes por jugador (imágenes, 6 animados, 15 colores), Olas por defecto |
+| Persistencia | Lista para Turso (falta crear la base); en local, archivo |
 | Publicación | Listo para Render gratis (`render.yaml`); aún sin desplegar |
 
 ## Decisiones clave
@@ -44,7 +45,8 @@ Tener una plataforma propia para jugar Commander en línea con amigos, con **tod
 | No usar REA para copiar EDHPlay | REA es un MCP de ingeniería inversa. La mecánica de una mesa de Commander es estándar, así que se construyó desde cero con código propio, sin tocar el JS ni los assets de EDHPlay. |
 | Servidor autoritativo (Node + Socket.IO) | La mano y la biblioteca ajenas nunca llegan al navegador rival: la información oculta se protege en el servidor. |
 | Reglas manuales, como en papel | Las cartas son imágenes y los jugadores aplican las reglas. Un motor de reglas completo es un proyecto de años (ver IA en próximos pasos). |
-| SQLite integrado de Node | Sin dependencias nativas. Su límite es que en Render gratis el disco se borra (ver próximos pasos). |
+| Base libSQL (Turso) | Mismo SQLite en local (archivo) y en producción (Turso, fuera del servidor), porque en Render gratis el disco se borra. |
+| Claves solo en variables de entorno | El repo es público: `render.yaml` declara los nombres sin valores y en local van en `.env`, que no se sube. |
 | Moxfield por link, apagado | Moxfield no tiene API pública ni login para terceros, y prohíbe el scraping sin permiso. El importador queda listo y se activa con `MOXFIELD_USER_AGENT` cuando ellos lo autoricen. |
 | Dirección visual Hearthstone | Elegida por Alejandro. El arte lo genera él con los prompts del documento de arte. |
 | Imágenes sin licencia clara fuera del repo | El repo es público. Los tapetes `mats/prueba-*` funcionan en local pero están en `.gitignore`. |
@@ -62,6 +64,7 @@ Tener una plataforma propia para jugar Commander en línea con amigos, con **tod
 | 0.6 | 01/11 | Login con Google, cuenta obligatoria, historial y estadísticas, terminar partida, atajos reasignables |
 | 0.7 | 01/11 | Estilo Taberna con el arte de Alejandro, atajos idénticos a EDHPlay, flechas, fases, maná, reacciones |
 | 0.8 | 01/11 | Campo en todo el tapete, mano sin parpadeo, flechas a cualquier zona, enviar cartas a otros, tapetes elegibles |
+| 0.10 | 03/11 | Cuentas persistentes: base libSQL lista para Turso, `.env` local para las claves |
 | 0.9 | 01/11 | Tapetes animados tipo lámpara de lava, tapetes de Alejandro (Olas por defecto), logo y portada «Placa rúnica», blueprint de Render |
 
 ## Dónde está cada cosa
@@ -71,7 +74,7 @@ Tener una plataforma propia para jugar Commander en línea con amigos, con **tod
 | `server/game.js` | Motor: estado de la sala, acciones validadas, vista filtrada por jugador |
 | `server/index.js` | Servidor HTTP + Socket.IO, salas, reconexión, manifiesto de arte |
 | `server/api.js`, `auth.js`, `google.js` | Cuentas, sesiones, login con Google, mazos, importación |
-| `server/db.js`, `history.js` | Esquema SQLite, historial y estadísticas |
+| `server/db.js`, `history.js` | Conexión libSQL/Turso, esquema, historial y estadísticas |
 | `public/` | Cliente sin compilación: `app.js` (interfaz), `deck.js` (listas y Scryfall), `style.css` |
 | `public/assets/` | Arte: tapetes, marcos, carteles, logo (cada imagen es opcional, con respaldo CSS) |
 | `test/` | Pruebas automáticas |

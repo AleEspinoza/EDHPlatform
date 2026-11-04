@@ -24,19 +24,21 @@ export function createHistory(db) {
 
   return {
     /** Guarda una partida; ignora las de práctica y las que no tienen jugadores con cuenta. */
-    record(rec) {
+    async record(rec) {
       if (rec.solo || !rec.players.some((pl) => pl.userId)) return null;
-      const { lastInsertRowid } = q.insertGame.run(rec.roomCode, rec.startedAt, rec.endedAt, rec.turns, rec.result, rec.winnerName);
+      const { lastInsertRowid } = await q.insertGame.run(rec.roomCode, rec.startedAt, rec.endedAt, rec.turns, rec.result, rec.winnerName);
       const gameId = Number(lastInsertRowid);
       for (const pl of rec.players) {
-        q.insertPlayer.run(gameId, pl.userId ?? null, pl.seat, pl.name, pl.commanders, pl.isWinner ? 1 : 0, pl.life ?? null);
+        await q.insertPlayer.run(gameId, pl.userId ?? null, pl.seat, pl.name, pl.commanders, pl.isWinner ? 1 : 0, pl.life ?? null);
       }
       return gameId;
     },
 
-    games(userId, { limit = 30, offset = 0 } = {}) {
-      return q.gamesForUser.all(userId, Math.min(100, limit), Math.max(0, offset)).map((g) => {
-        const players = q.playersOf.all(g.id);
+    async games(userId, { limit = 30, offset = 0 } = {}) {
+      const rows = await q.gamesForUser.all(userId, Math.min(100, limit), Math.max(0, offset));
+      const playersBy = await Promise.all(rows.map((g) => q.playersOf.all(g.id)));
+      return rows.map((g, i) => {
+        const players = playersBy[i];
         const me = players.find((pl) => pl.user_id === userId);
         return {
           id: g.id,
@@ -51,8 +53,9 @@ export function createHistory(db) {
       });
     },
 
-    stats(userId) {
-      const t = q.totals.get(userId);
+    async stats(userId) {
+      const t = await q.totals.get(userId);
+      const cmdRows = await q.byCommander.all(userId);
       const decided = (t.wins ?? 0) + (t.losses ?? 0);
       return {
         games: t.games ?? 0,
@@ -63,7 +66,7 @@ export function createHistory(db) {
         winRate: decided ? (t.wins ?? 0) / decided : null,
         avgTurns: t.avg_turns ? Math.round(t.avg_turns * 10) / 10 : null,
         avgMinutes: t.avg_ms != null ? Math.max(1, Math.round(t.avg_ms / 60000)) : null,
-        byCommander: q.byCommander.all(userId).map((r) => ({ commanders: r.commanders, games: r.games, wins: r.wins, lastPlayed: r.last_played })),
+        byCommander: cmdRows.map((r) => ({ commanders: r.commanders, games: r.games, wins: r.wins, lastPlayed: r.last_played })),
       };
     },
   };

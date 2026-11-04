@@ -57,10 +57,13 @@ Para una prueba rápida desde tu computador también sirve un túnel: `npx cloud
 
 ### Variables de entorno
 
+En local, copia `.env.example` como `.env` y complétalo; `npm start` lo carga solo. `.env` está en `.gitignore`, así que las claves nunca llegan al repo. En Render se cargan en el panel del servicio (**Environment**).
+
 | Variable | Para qué |
 |---|---|
 | `PORT` | Puerto HTTP (3000 por defecto) |
-| `DB_FILE` | Ruta de la base SQLite (por defecto `data/edhplatform.db`) |
+| `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Base persistente en [Turso](https://turso.tech). Sin ellas se usa un archivo local |
+| `DB_FILE` | Ruta del archivo local (por defecto `data/edhplatform.db`) |
 | `NODE_ENV=production` | Cookies de sesión con `Secure` (requiere HTTPS) |
 | `TRUST_PROXY=1` | Detrás de un proxy (Render, Railway, Fly) |
 | `MOXFIELD_USER_AGENT` | Activa la importación por link de Moxfield |
@@ -71,7 +74,7 @@ Para una prueba rápida desde tu computador también sirve un túnel: `npx cloud
 
 1. En [Google Cloud Console](https://console.cloud.google.com/apis/credentials) crea un proyecto y configura la **pantalla de consentimiento OAuth** (tipo externo; alcances `openid`, `email` y `profile`).
 2. Crea una credencial **ID de cliente OAuth → Aplicación web** y agrega como URI de redireccionamiento autorizado `http://localhost:3000/api/auth/google/callback` (y el de tu dominio cuando lo despliegues).
-3. Arranca con `GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... npm start`. Sin esas variables el botón de Google no aparece y se entra con usuario y contraseña.
+3. Pon `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` en tu `.env` y arranca con `npm start`. Sin esas variables el botón de Google no aparece y se entra con usuario y contraseña.
 
 ### Sobre Moxfield
 

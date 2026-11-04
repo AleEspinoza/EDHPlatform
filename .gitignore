@@ -4,3 +4,8 @@ data/
 
 # Imágenes de prueba sin licencia clara: solo locales, nunca al repo público
 public/assets/mats/prueba-*
+
+# Claves locales: nunca al repo (en Render van en el panel, no en archivos)
+.env
+.env.*
+!.env.example

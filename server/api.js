@@ -67,9 +67,9 @@ export function createApi({ db, auth, history, google = null }) {
     next();
   });
 
-  router.use((req, _res, next) => {
+  router.use(async (req, _res, next) => {
     req.sessionToken = parseCookies(req.get('cookie'))[SESSION_COOKIE];
-    req.user = auth.userFromToken(req.sessionToken);
+    req.user = await auth.userFromToken(req.sessionToken);
     next();
   });
 
@@ -77,27 +77,27 @@ export function createApi({ db, auth, history, google = null }) {
   const secure = (req) => req.secure || process.env.NODE_ENV === 'production';
 
   // ---- Cuentas ----
-  router.post('/auth/register', (req, res) => {
-    const { user, token } = auth.register(req.body?.username, req.body?.password);
+  router.post('/auth/register', async (req, res) => {
+    const { user, token } = await auth.register(req.body?.username, req.body?.password);
     res.setHeader('Set-Cookie', sessionCookie(token, { secure: secure(req) }));
     res.status(201).json({ user });
   });
-  router.post('/auth/login', (req, res) => {
-    const { user, token } = auth.login(req.body?.username, req.body?.password, req.ip);
+  router.post('/auth/login', async (req, res) => {
+    const { user, token } = await auth.login(req.body?.username, req.body?.password, req.ip);
     res.setHeader('Set-Cookie', sessionCookie(token, { secure: secure(req) }));
     res.json({ user });
   });
-  router.post('/auth/logout', (req, res) => {
-    auth.logout(req.sessionToken);
+  router.post('/auth/logout', async (req, res) => {
+    await auth.logout(req.sessionToken);
     res.setHeader('Set-Cookie', clearCookie());
     res.json({ ok: true });
   });
-  router.get('/auth/me', (req, res) => res.json({ user: req.user }));
-  router.get('/auth/providers', (_req, res) => res.json({ google: Boolean(google), password: true }));
+  router.get('/auth/me', async (req, res) => res.json({ user: req.user }));
+  router.get('/auth/providers', async (_req, res) => res.json({ google: Boolean(google), password: true }));
 
   // ---- Google ----
   const callbackUrl = (req) => `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
-  router.get('/auth/google', (req, res) => {
+  router.get('/auth/google', async (req, res) => {
     if (!google) throw new ApiError('El inicio de sesión con Google no está configurado en este servidor', 501);
     const { url, state } = google.start(callbackUrl(req));
     res.append('Set-Cookie', `${OAUTH_COOKIE}=${state}; Path=/api/auth/google; HttpOnly; SameSite=Lax; Max-Age=600${secure(req) ? '; Secure' : ''}`);
@@ -113,7 +113,7 @@ export function createApi({ db, auth, history, google = null }) {
         state: typeof req.query.state === 'string' ? req.query.state : null,
         cookieState: parseCookies(req.get('cookie'))[OAUTH_COOKIE],
       });
-      const { token } = auth.googleLogin(profile);
+      const { token } = await auth.googleLogin(profile);
       res.append('Set-Cookie', sessionCookie(token, { secure: secure(req) }));
       res.redirect(302, '/');
     } catch (err) {
@@ -124,45 +124,45 @@ export function createApi({ db, auth, history, google = null }) {
   });
 
   // ---- Historial ----
-  router.get('/games', requireUser, (req, res) => {
-    res.json({ games: history.games(req.user.id, { limit: Number(req.query.limit) || 30, offset: Number(req.query.offset) || 0 }) });
+  router.get('/games', requireUser, async (req, res) => {
+    res.json({ games: await history.games(req.user.id, { limit: Number(req.query.limit) || 30, offset: Number(req.query.offset) || 0 }) });
   });
-  router.get('/stats', requireUser, (req, res) => res.json({ stats: history.stats(req.user.id) }));
+  router.get('/stats', requireUser, async (req, res) => res.json({ stats: await history.stats(req.user.id) }));
 
   // ---- Mazos ----
-  router.get('/decks', requireUser, (req, res) => res.json({ decks: q.list.all(req.user.id).map(deckSummary) }));
+  router.get('/decks', requireUser, async (req, res) => res.json({ decks: (await q.list.all(req.user.id)).map(deckSummary) }));
 
-  router.get('/decks/:id', requireUser, (req, res) => {
-    const row = q.get.get(Number(req.params.id), req.user.id);
+  router.get('/decks/:id', requireUser, async (req, res) => {
+    const row = await q.get.get(Number(req.params.id), req.user.id);
     if (!row) throw new ApiError('Mazo no encontrado', 404);
     res.json({
       deck: { ...deckSummary(row), commandersText: row.commanders_text, listText: row.list_text, resolved: JSON.parse(row.resolved_json) },
     });
   });
 
-  router.post('/decks', requireUser, (req, res) => {
-    if (q.count.get(req.user.id).n >= MAX_DECKS_PER_USER) throw new ApiError(`Máximo ${MAX_DECKS_PER_USER} mazos por cuenta`);
+  router.post('/decks', requireUser, async (req, res) => {
+    if ((await q.count.get(req.user.id)).n >= MAX_DECKS_PER_USER) throw new ApiError(`Máximo ${MAX_DECKS_PER_USER} mazos por cuenta`);
     const d = deckFromBody(req.body);
     const now = Date.now();
-    const { lastInsertRowid } = q.insert.run(req.user.id, d.name, d.commandersText, d.listText, JSON.stringify(d.resolved), d.commanderNames, d.cardCount, now, now);
-    res.status(201).json({ deck: deckSummary(q.get.get(Number(lastInsertRowid), req.user.id)) });
+    const { lastInsertRowid } = await q.insert.run(req.user.id, d.name, d.commandersText, d.listText, JSON.stringify(d.resolved), d.commanderNames, d.cardCount, now, now);
+    res.status(201).json({ deck: deckSummary(await q.get.get(Number(lastInsertRowid), req.user.id)) });
   });
 
-  router.put('/decks/:id', requireUser, (req, res) => {
+  router.put('/decks/:id', requireUser, async (req, res) => {
     const d = deckFromBody(req.body);
-    const { changes } = q.update.run(d.name, d.commandersText, d.listText, JSON.stringify(d.resolved), d.commanderNames, d.cardCount, Date.now(), Number(req.params.id), req.user.id);
+    const { changes } = await q.update.run(d.name, d.commandersText, d.listText, JSON.stringify(d.resolved), d.commanderNames, d.cardCount, Date.now(), Number(req.params.id), req.user.id);
     if (!changes) throw new ApiError('Mazo no encontrado', 404);
-    res.json({ deck: deckSummary(q.get.get(Number(req.params.id), req.user.id)) });
+    res.json({ deck: deckSummary(await q.get.get(Number(req.params.id), req.user.id)) });
   });
 
-  router.delete('/decks/:id', requireUser, (req, res) => {
-    const { changes } = q.remove.run(Number(req.params.id), req.user.id);
+  router.delete('/decks/:id', requireUser, async (req, res) => {
+    const { changes } = await q.remove.run(Number(req.params.id), req.user.id);
     if (!changes) throw new ApiError('Mazo no encontrado', 404);
     res.json({ ok: true });
   });
 
   // ---- Importación ----
-  router.get('/import/moxfield/status', (_req, res) => res.json({ enabled: Boolean(process.env.MOXFIELD_USER_AGENT) }));
+  router.get('/import/moxfield/status', async (_req, res) => res.json({ enabled: Boolean(process.env.MOXFIELD_USER_AGENT) }));
   router.get('/import/moxfield', async (req, res, next) => {
     try {
       res.json({ deck: await importMoxfield(req.query.url) });

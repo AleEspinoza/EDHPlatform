@@ -183,17 +183,17 @@ test('Google: se rechazan tokens de otra app, vencidos o sin verificar', () => {
   assert.throws(() => verifyIdTokenClaims(jwt({ ...goodClaims(), email_verified: false }), CLIENT), /verificado/);
 });
 
-test('Google: crea la cuenta una vez y la reutiliza; no permite login con contraseña', () => {
-  const auth = createAuth(openDb(':memory:'));
-  const first = auth.googleLogin({ sub: 'g1', email: 'ale@gmail.com', name: 'Alejandro Pérez', picture: null });
+test('Google: crea la cuenta una vez y la reutiliza; no permite login con contraseña', async () => {
+  const auth = createAuth(await openDb(':memory:'));
+  const first = await auth.googleLogin({ sub: 'g1', email: 'ale@gmail.com', name: 'Alejandro Pérez', picture: null });
   assert.equal(first.user.username, 'Alejandro_Perez');
   assert.equal(first.user.displayName, 'Alejandro Pérez');
-  const again = auth.googleLogin({ sub: 'g1', email: 'ale@gmail.com', name: 'Alejandro Pérez', picture: null });
+  const again = await auth.googleLogin({ sub: 'g1', email: 'ale@gmail.com', name: 'Alejandro Pérez', picture: null });
   assert.equal(again.user.id, first.user.id);
-  const other = auth.googleLogin({ sub: 'g2', email: 'x@gmail.com', name: 'Alejandro Pérez', picture: null });
+  const other = await auth.googleLogin({ sub: 'g2', email: 'x@gmail.com', name: 'Alejandro Pérez', picture: null });
   assert.equal(other.user.username, 'Alejandro_Perez2', 'nombre único');
-  assert.throws(() => auth.login('Alejandro_Perez', ''), /incorrectos/);
-  assert.equal(auth.userFromToken(first.token).id, first.user.id);
+  await assert.rejects(auth.login('Alejandro_Perez', ''), /incorrectos/);
+  assert.equal((await auth.userFromToken(first.token)).id, first.user.id);
 });
 
 test('Google: sin configurar, el botón responde 501 y providers lo indica', async () => {

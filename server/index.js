@@ -18,7 +18,8 @@ const ROOM_TTL_MS = 6 * 60 * 60 * 1000; // salas sin actividad se eliminan a las
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sin 0/O/1/I
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const db = openDb();
+export const db = await openDb();
+console.log(`Base de datos: ${db.info.remote ? `Turso (${new URL(db.info.url).host})` : 'archivo local'}`);
 const auth = createAuth(db);
 const history = createHistory(db);
 const gConfig = googleConfig();
@@ -72,16 +73,26 @@ function seat(socket, room, player) {
 const reply = (ack, payload) => typeof ack === 'function' && ack(payload);
 
 // La cuenta (si hay sesión) viaja en la cookie del handshake.
-io.use((socket, next) => {
-  socket.data.user = auth.userFromToken(parseCookies(socket.handshake.headers.cookie)[SESSION_COOKIE]);
-  next();
+io.use(async (socket, next) => {
+  try {
+    socket.data.user = await auth.userFromToken(parseCookies(socket.handshake.headers.cookie)[SESSION_COOKIE]);
+    next();
+  } catch (err) {
+    console.error('No se pudo validar la sesión del socket:', err.message);
+    next(new Error('sesión'));
+  }
 });
 const displayName = (socket) => socket.data.user.displayName || socket.data.user.username;
 const LOGIN_REQUIRED = { ok: false, error: 'Inicia sesión para jugar', code: 'login' };
 
 /** Cierra una sala guardando como «sin terminar» la partida que estuviera en curso. */
+/** Guarda una partida en el historial en segundo plano. */
+function saveGame(record) {
+  return history.record(record).catch((err) => console.error('No se pudo guardar la partida:', err.message));
+}
+
 function closeRoom(room) {
-  if (hasGameInProgress(room)) history.record(gameRecord(room, 'unfinished'));
+  if (hasGameInProgress(room)) saveGame(gameRecord(room, 'unfinished'));
   rooms.delete(room.code);
 }
 
@@ -115,12 +126,12 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('action', (action, ack) => {
+  socket.on('action', async (action, ack) => {
     const room = rooms.get(socket.data.code);
     if (!room) return reply(ack, { ok: false, error: 'No estás en una sala' });
     try {
       const result = applyAction(room, socket.data.playerId, action);
-      if (result.record) history.record(result.record);
+      if (result.record) await saveGame(result.record);
       reply(ack, { ok: true, private: result.private ?? null });
       if (result.event) io.to(room.code).emit('event', result.event);
       broadcast(room);
@@ -136,7 +147,7 @@ io.on('connection', (socket) => {
       // Si con esta salida la partida queda con menos de 2 jugadores, se guarda como sin terminar.
       const humansLeft = room.players.filter((p) => !p.controlledBy && p.deck && p.id !== socket.data.playerId).length;
       if (hasGameInProgress(room) && humansLeft < 2) {
-        history.record(gameRecord(room, 'unfinished'));
+        saveGame(gameRecord(room, 'unfinished'));
         room.gameStartedAt = null;
       }
       removePlayer(room, socket.data.playerId);
@@ -164,7 +175,7 @@ io.on('connection', (socket) => {
 
 setInterval(() => {
   const now = Date.now();
-  auth.purge();
+  auth.purge().catch((err) => console.error('No se pudieron limpiar sesiones:', err.message));
   for (const [code, room] of rooms) {
     if (now - room.lastActive > ROOM_TTL_MS && !room.players.some((p) => p.connected && !p.controlledBy)) closeRoom(room);
   }

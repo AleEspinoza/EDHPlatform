@@ -7,6 +7,8 @@ services:
     buildCommand: npm ci --omit=dev
     startCommand: npm start
     healthCheckPath: /health
+    # Las claves NO van aquí: «sync: false» solo declara el nombre y Render pide el
+    # valor en su panel la primera vez. Así nunca quedan en el repo público.
     envVars:
       - key: NODE_ENV
         value: production
@@ -15,4 +17,8 @@ services:
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
         sync: false

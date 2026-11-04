@@ -11,7 +11,7 @@ function setup() {
   const room = createRoom('TEST01');
   const a = addPlayer(room, 'Ale');
   const b = addPlayer(room, 'Rival');
-  applyAction(room, a.id, { type: 'setDeck', cards: deck(99), commanders: [{ name: "K'rrik" }] });
+  applyAction(room, a.id, { type: 'setDeck', cards: deck(99), commanders: [{ name: "K'rrik" }], opening: false });
   return { room, a, b };
 }
 
@@ -134,10 +134,10 @@ test('partida por sockets: exige cuenta, crear sala, unirse, reconectar, termina
     assert.equal(joined.ok, true);
 
     const stateP = once(s2, 'state');
-    await emit(s1, 'action', { type: 'setDeck', cards: deck(10), commanders: [{ name: 'Tymna' }] });
+    await emit(s1, 'action', { type: 'setDeck', cards: deck(10), commanders: [{ name: 'Tymna' }], opening: false });
     const [state] = await stateP;
     assert.deepEqual(state.players.map((p) => p.name), ['ale_sock', 'rival_sock']);
-    await emit(s2, 'action', { type: 'setDeck', cards: deck(10), commanders: [{ name: "K'rrik" }] });
+    await emit(s2, 'action', { type: 'setDeck', cards: deck(10), commanders: [{ name: "K'rrik" }], opening: false });
 
     const bad = await emit(s2, 'joinRoom', { code: 'ZZZZZZ' });
     assert.equal(bad.ok, false);
@@ -176,15 +176,16 @@ test('partida por sockets: exige cuenta, crear sala, unirse, reconectar, termina
 
 test('fin de partida: empate, revancha y resumen', () => {
   const { room, a, b } = setup();
-  applyAction(room, b.id, { type: 'setDeck', cards: deck(20), commanders: [] });
+  applyAction(room, b.id, { type: 'setDeck', cards: deck(20), commanders: [], opening: false });
   applyAction(room, a.id, { type: 'passTurn' });
   applyAction(room, a.id, { type: 'draw', n: 5 });
   const res = applyAction(room, a.id, { type: 'endGame', rematch: true });
   assert.equal(res.record.result, 'draw');
   assert.equal(res.record.players.length, 2);
   assert.equal(room.turn, 0);
-  assert.equal(a.zones.hand.length, 0, 'la revancha rebaraja');
-  assert.equal(a.zones.library.length, 99);
+  assert.equal(a.zones.hand.length, 7, 'la revancha rebaraja y reparte la mano inicial');
+  assert.equal(a.zones.library.length, 92);
+  assert.deepEqual(a.opening, { mulligans: 0 });
 });
 
 test('el log no filtra el nombre de una carta jugada boca abajo', () => {
@@ -233,7 +234,7 @@ function playOne(room, p) {
 
 test('adjuntar a un permanente propio o rival, y soltar cuando el anfitrión deja el campo', () => {
   const { room, a, b } = setup();
-  applyAction(room, b.id, { type: 'setDeck', cards: deck(20), commanders: [] });
+  applyAction(room, b.id, { type: 'setDeck', cards: deck(20), commanders: [], opening: false });
   const aura = playOne(room, a);
   const host = playOne(room, b);
   applyAction(room, a.id, { type: 'attach', iid: aura.iid, target: host.iid });
@@ -268,7 +269,7 @@ test('cambio de control: el controlador la maneja y al salir del campo vuelve al
 
 test('reiniciar devuelve las cartas cedidas y recupera las propias', () => {
   const { room, a, b } = setup();
-  applyAction(room, b.id, { type: 'setDeck', cards: deck(20), commanders: [] });
+  applyAction(room, b.id, { type: 'setDeck', cards: deck(20), commanders: [], opening: false });
   const mine = playOne(room, a);
   const theirs = playOne(room, b);
   applyAction(room, a.id, { type: 'giveControl', iid: mine.iid, to: b.id });
@@ -276,12 +277,12 @@ test('reiniciar devuelve las cartas cedidas y recupera las propias', () => {
   applyAction(room, a.id, { type: 'reset' });
   assert.equal(b.zones.battlefield.some((c) => c.iid === mine.iid), false);
   assert.equal(b.zones.battlefield.some((c) => c.iid === theirs.iid), true);
-  assert.equal(a.zones.library.length, 99);
+  assert.equal(a.zones.library.length + a.zones.hand.length, 99);
 });
 
 test('acciones sobre la zona de un rival quedan en el log', () => {
   const { room, a, b } = setup();
-  applyAction(room, b.id, { type: 'setDeck', cards: deck(20), commanders: [] });
+  applyAction(room, b.id, { type: 'setDeck', cards: deck(20), commanders: [], opening: false });
   applyAction(room, a.id, { type: 'targetZone', target: b.id, op: 'mill', n: 2 });
   assert.equal(b.zones.graveyard.length, 2);
   applyAction(room, a.id, { type: 'targetZone', target: b.id, op: 'exileTop', n: 1 });
@@ -299,8 +300,8 @@ test('acciones sobre la zona de un rival quedan en el log', () => {
 test('modo solitario: asientos controlados por el anfitrión', () => {
   const room = createRoom('SOLO01', { solo: true });
   const host = addPlayer(room, 'Ale');
-  applyAction(room, host.id, { type: 'setDeck', cards: deck(99), commanders: [{ name: 'Tymna' }] });
-  applyAction(room, host.id, { type: 'addSeat', name: 'Rival 1', copyDeck: true });
+  applyAction(room, host.id, { type: 'setDeck', cards: deck(99), commanders: [{ name: 'Tymna' }], opening: false });
+  applyAction(room, host.id, { type: 'addSeat', name: 'Rival 1', copyDeck: true, opening: false });
   const seat = room.players[1];
   assert.equal(seat.controlledBy, host.id);
   assert.equal(seat.zones.library.length, 99);
@@ -359,7 +360,7 @@ test('fuerza/resistencia, contadores en bloque, fases, maná, flechas, reaccione
 
 test('enviar mis cartas a las zonas de otro jugador', () => {
   const { room, a, b } = setup();
-  applyAction(room, b.id, { type: 'setDeck', cards: deck(20), commanders: [] });
+  applyAction(room, b.id, { type: 'setDeck', cards: deck(20), commanders: [], opening: false });
   applyAction(room, a.id, { type: 'draw', n: 3 });
   const [c1, c2, c3] = a.zones.hand;
   applyAction(room, a.id, { type: 'move', iid: c1.iid, to: 'battlefield', toPlayer: b.id, x: 0.2, y: 0.3 });
@@ -395,4 +396,47 @@ test('tapetes: color o imagen de assets/mats, visibles para todos', () => {
   assert.throws(() => applyAction(room, a.id, { type: 'setMat', mat: { kind: 'anim', value: 'otra' } }), /inválido/);
   applyAction(room, a.id, { type: 'setMat', mat: null });
   assert.equal(a.mat, null);
+});
+
+test('mano inicial: el primer mulligan es gratis y cada siguiente manda una carta más al fondo', () => {
+  const room = createRoom('MULL01');
+  const a = addPlayer(room, 'Ale');
+  const b = addPlayer(room, 'Rival');
+  applyAction(room, a.id, { type: 'setDeck', cards: deck(99), commanders: [{ name: 'Tymna' }] });
+  assert.equal(a.zones.hand.length, 7, 'al cargar el mazo se roba la mano inicial');
+  assert.deepEqual(viewFor(room, a.id).players[0].opening, { mulligans: 0, toBottom: 0 });
+  assert.deepEqual(viewFor(room, b.id).players[0].opening, { mulligans: 0, toBottom: 0 }, 'los rivales ven que está decidiendo');
+
+  applyAction(room, a.id, { type: 'mulligan' });
+  assert.equal(a.zones.hand.length, 7);
+  assert.equal(viewFor(room, a.id).players[0].opening.toBottom, 0, 'el primero es gratis');
+  applyAction(room, a.id, { type: 'mulligan' });
+  applyAction(room, a.id, { type: 'mulligan' });
+  assert.equal(a.zones.hand.length + a.zones.library.length, 99, 'ninguna carta se pierde al barajar');
+  assert.equal(viewFor(room, a.id).players[0].opening.toBottom, 2);
+
+  assert.throws(() => applyAction(room, a.id, { type: 'keepHand', bottom: [a.zones.hand[0].iid] }), /Elige 2 cartas/);
+  assert.throws(() => applyAction(room, a.id, { type: 'keepHand', bottom: [a.zones.hand[0].iid, a.zones.hand[0].iid] }), /Elige 2 cartas/);
+  const [x, y] = a.zones.hand;
+  applyAction(room, a.id, { type: 'keepHand', bottom: [x.iid, y.iid] });
+  assert.equal(a.zones.hand.length, 5);
+  assert.equal(a.opening, null);
+  assert.deepEqual(a.zones.library.slice(0, 2).map((c) => c.iid).sort(), [x.iid, y.iid].sort(), 'quedan en el fondo');
+  assert.throws(() => applyAction(room, a.id, { type: 'keepHand', bottom: [] }), /No hay una mano inicial/);
+  assert.match(room.log.at(-1).text, /3 mulligans y pone 2 cartas en el fondo/);
+
+  applyAction(room, a.id, { type: 'mulligan' });
+  assert.equal(a.zones.hand.length, 7, 'fuera de la mano inicial, el mulligan del menú sigue funcionando');
+});
+
+test('el maná flotante se vacía al avanzar de fase y al pasar el turno', () => {
+  const room = createRoom('MANA01');
+  const a = addPlayer(room, 'Ale');
+  applyAction(room, a.id, { type: 'mana', color: 'U', delta: 3 });
+  assert.equal(a.mana.U, 3);
+  applyAction(room, a.id, { type: 'phase' });
+  assert.equal(a.mana.U, 0);
+  applyAction(room, a.id, { type: 'mana', color: 'G', delta: 1 });
+  applyAction(room, a.id, { type: 'passTurn' });
+  assert.equal(a.mana.G, 0);
 });

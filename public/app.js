@@ -383,6 +383,7 @@ function render() {
   requestAnimationFrame(drawArrows);
   if (zoneView && !zoneView.library) renderZoneModal();
   if (!$('#modal-mat').classList.contains('hidden')) renderMatPicker();
+  renderOpening();
 }
 addEventListener('resize', () => { if (state) { renderHand(); drawArrows(); } });
 
@@ -597,7 +598,8 @@ function renderPanel(p) {
         isSeat && mine ? h('span', { class: 'muted small' }, '(asiento)') : null,
         isSeat && mine ? h('button', { class: 'seat-x', title: 'Quitar asiento', onclick: () => confirm(`¿Quitar el asiento ${p.name}?`) && send({ type: 'removeSeat', target: p.id }) }, '×') : null),
       h('span', { class: 'cmdnames' }, p.commanderNames.join(' + ')),
-      h('div', { class: 'hero-stats' }, handChip, poison, ...cmdStats, isSeat && mine ? h('button', { class: 'btn small ghost', onclick: () => openDeckModal(p.id) }, 'Mazo') : null),
+      h('div', { class: 'hero-stats' }, handChip, poison,
+        p.opening && !mine ? h('span', { class: 'stat deciding', title: 'Todavía elige su mano inicial' }, p.opening.mulligans ? `Mulligan ${p.opening.mulligans}` : 'Eligiendo mano') : null, ...cmdStats, isSeat && mine ? h('button', { class: 'btn small ghost', onclick: () => openDeckModal(p.id) }, 'Mazo') : null),
       renderMana(p, mine)));
 
   // Zona de mando: un espacio por comandante (uno o dos).
@@ -676,15 +678,93 @@ function renderMatPicker() {
 $('#btn-mat').addEventListener('click', () => { renderMatPicker(); openModal('#modal-mat'); });
 
 const MANA_COLORS = [['W', '#f4ecc8', 'Blanco'], ['U', '#4f8fd8', 'Azul'], ['B', '#4b3f52', 'Negro'], ['R', '#d9553f', 'Rojo'], ['G', '#3f9b5c', 'Verde'], ['C', '#b9b3a8', 'Incoloro']];
+const manaIcon = (c) => {
+  const img = h('img', { src: `https://svgs.scryfall.io/card-symbols/${c}.svg`, alt: c, draggable: 'false' });
+  img.addEventListener('error', () => img.replaceWith(h('i', {}, c)), { once: true });
+  return img;
+};
+/** Maná flotante al estilo EDHPlay: los seis símbolos con su contador. */
 function renderMana(p, mine) {
-  const any = Object.values(p.mana ?? {}).some(Boolean);
-  if (!any && !(mine && showMana)) return null;
-  return h('div', { class: 'mana', title: mine ? 'Maná flotante. Clic +1, clic derecho −1 (se vacía al pasar el turno)' : 'Maná flotante' },
-    ...MANA_COLORS.filter(([c]) => mine || p.mana[c]).map(([c, color, name]) => h('button', {
-      class: `pip${p.mana[c] ? ' on' : ''}`, style: { '--mc': color }, title: name, disabled: !mine,
-      onclick: mine ? () => act(p.id, { type: 'mana', color: c, delta: 1 }) : null,
-      oncontextmenu: mine ? (e) => { e.preventDefault(); act(p.id, { type: 'mana', color: c, delta: -1 }); } : null,
-    }, h('i', {}, c), h('b', {}, p.mana[c] || ''))));
+  const pool = p.mana ?? {};
+  const total = Object.values(pool).reduce((n, v) => n + (v || 0), 0);
+  if (!mine) {
+    if (!total) return null;
+    return h('div', { class: 'mana-pool compact', title: 'Maná flotante' },
+      ...MANA_COLORS.filter(([c]) => pool[c]).map(([c, color, name]) => h('span', { class: 'mpip on', style: { '--mc': color }, title: `${name}: ${pool[c]}` }, manaIcon(c), h('b', {}, pool[c]))));
+  }
+  if (!showMana && !total) return null;
+  const change = (c, delta) => act(p.id, { type: 'mana', color: c, delta });
+  return h('div', { class: `mana-pool${total ? ' has' : ''}`, title: 'Maná flotante · clic +1 · clic derecho o Shift+clic −1 · rueda ± · se vacía al cambiar de fase' },
+    ...MANA_COLORS.map(([c, color, name]) => h('button', {
+      class: `mpip${pool[c] ? ' on' : ''}`, style: { '--mc': color }, title: `${name}: ${pool[c] || 0}`,
+      onclick: (e) => change(c, e.shiftKey ? -1 : 1),
+      oncontextmenu: (e) => { e.preventDefault(); change(c, -1); },
+      onwheel: (e) => { e.preventDefault(); change(c, e.deltaY < 0 ? 1 : -1); },
+    }, manaIcon(c), h('b', {}, pool[c] || ''))),
+    h('span', { class: 'mana-total', title: 'Maná total' }, total),
+    h('button', { class: 'mana-clear', title: 'Vaciar el maná', disabled: !total, onclick: () => act(p.id, { type: 'clearMana' }) }, '✕'));
+}
+
+// ---------- Mano inicial y mulligan ----------
+let openingPick = { pid: null, m: -1, ids: [] }; // cartas elegidas para el fondo
+let openingMin = false; // panel minimizado para mirar la mesa
+function renderOpening() {
+  const p = state && myPlayers().find((pl) => pl.opening);
+  let el = $('#opening');
+  if (!p) { el?.remove(); openingMin = false; return; }
+  const { mulligans: m, toBottom } = p.opening;
+  if (openingPick.pid !== p.id || openingPick.m !== m) openingPick = { pid: p.id, m, ids: [] };
+  const hand = p.zones.hand;
+  openingPick.ids = openingPick.ids.filter((iid) => hand.some((c) => c.iid === iid));
+  const need = Math.min(toBottom, hand.length);
+  const picked = openingPick.ids;
+  if (!el) {
+    el = h('div', { id: 'opening', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Mano inicial' });
+    document.body.append(el);
+  }
+  el.classList.toggle('min', openingMin);
+  const deal = el.dataset.deal !== `${p.id}:${m}`; // animar el reparto solo con una mano nueva
+  el.dataset.deal = `${p.id}:${m}`;
+  if (openingMin) {
+    delete el.dataset.deal;
+    el.replaceChildren(h('button', { class: 'opening-pill', onclick: () => { openingMin = false; renderOpening(); } }, `✋ Mano inicial pendiente${p.id !== state.you ? ` · ${p.name}` : ''}`));
+    return;
+  }
+  const keep = () => {
+    if (picked.length !== need) return;
+    act(p.id, { type: 'keepHand', bottom: picked });
+  };
+  const toggle = (iid) => {
+    if (!need) return;
+    const i = picked.indexOf(iid);
+    if (i >= 0) picked.splice(i, 1);
+    else if (picked.length < need) picked.push(iid);
+    else { picked.shift(); picked.push(iid); }
+    renderOpening();
+  };
+  const sub = m === 0 ? '¿Te quedas con esta mano?'
+    : need ? `Mulligan ${m} · elige ${need} carta${need === 1 ? '' : 's'} para el fondo de tu biblioteca (${picked.length}/${need})`
+      : `Mulligan ${m} (gratis) · ¿te quedas con esta mano?`;
+  const nextLabel = m === 0 ? 'Mulligan (gratis)' : `Mulligan (${m} al fondo)`;
+  el.replaceChildren(h('div', { class: 'opening-box' },
+    h('div', { class: 'opening-head' },
+      h('h2', {}, 'Mano inicial', p.id !== state.you ? h('span', { class: 'muted' }, ` · ${p.name}`) : null),
+      h('p', {}, sub),
+      h('button', { class: 'btn small ghost opening-hide', title: 'Ocultar para mirar la mesa', onclick: () => { openingMin = true; renderOpening(); } }, 'Ver la mesa')),
+    h('div', { class: `opening-cards${need ? ' picking' : ''}${deal ? ' deal' : ''}`, style: { '--n': Math.max(hand.length, 1) } },
+      ...hand.map((c, i) => {
+        const at = picked.indexOf(c.iid);
+        return h('button', {
+          class: `opening-card${at >= 0 ? ' bottom' : ''}`, style: { '--i': i }, title: c.name, disabled: !need,
+          onclick: () => toggle(c.iid),
+        }, c.image ? h('img', { src: c.image, alt: c.name, draggable: 'false' }) : h('span', { class: 'opening-name' }, c.name),
+        at >= 0 ? h('span', { class: 'opening-tag' }, need > 1 ? `Fondo ${at + 1}` : 'Al fondo') : null);
+      })),
+    h('div', { class: 'opening-actions' },
+      h('button', { class: 'btn', disabled: m >= 7, onclick: () => act(p.id, { type: 'mulligan' }) }, nextLabel),
+      h('button', { class: 'btn primary', disabled: picked.length !== need, onclick: keep },
+        need ? `Conservar y poner ${need} al fondo` : 'Conservar'))));
+  el._keep = keep;
 }
 
 /** Siguiente hueco libre del campo: tierras en la fila de abajo, el resto arriba. */
@@ -1178,7 +1258,7 @@ async function playSavedDeck(d) {
     const res = await act(deckFor, { type: 'setDeck', commanders: deck.resolved.commanders, cards: deck.resolved.cards });
     if (res?.ok) {
       closeModal('#modal-deck');
-      toast(`Mazo «${deck.name}» listo. ¡Roba 7!`);
+      toast(`Mazo «${deck.name}» listo`);
     }
   } catch (err) {
     toast(err.message, true);
@@ -1283,7 +1363,7 @@ $('#btn-deck-load').addEventListener('click', async () => {
         toast(`Mazo cargado (${count}). Faltaron ${deck.notFound.length}; revisa el modal de mazo.`);
       } else {
         closeModal('#modal-deck');
-        toast(`Mazo cargado: ${count} cartas. ¡Roba 7 con clic derecho en la biblioteca!`);
+        toast(`Mazo cargado: ${count} cartas`);
       }
     }
   } catch (err) {
@@ -1450,7 +1530,7 @@ $('#chat-form').addEventListener('submit', (e) => {
 const seatNow = () => handSeat ?? state.you;
 let selected = new Set(); // cartas seleccionadas (selección múltiple)
 let cardScale = Number(store.get('edh.scale', 1)) || 1;
-let showMana = store.get('edh.mana', false);
+let showMana = store.get('edh.mana.v2', true);
 let focusPid = null;
 
 /** Carta bajo el mouse que controlo. */
@@ -1479,7 +1559,7 @@ const SHORTCUTS = [
   { group: 'Acciones globales', id: 'untapAll', label: 'Enderezar todo', keys: 'u', run: () => act(seatNow(), { type: 'untapAll' }) },
   { group: 'Acciones globales', id: 'sizeUp', label: 'Aumentar tamaño de carta', keys: '=', run: () => setScale(cardScale + 0.1) },
   { group: 'Acciones globales', id: 'sizeDown', label: 'Reducir tamaño de carta', keys: '-', run: () => setScale(cardScale - 0.1) },
-  { group: 'Acciones globales', id: 'mana', label: 'Alternar rastreador de maná', keys: 'm', run: () => { showMana = !showMana; store.set('edh.mana', showMana); render(); } },
+  { group: 'Acciones globales', id: 'mana', label: 'Alternar rastreador de maná', keys: 'm', run: () => { showMana = !showMana; store.set('edh.mana.v2', showMana); render(); } },
   { group: 'Acciones globales', id: 'phase', label: 'Avanzar fase', keys: 'q', run: () => send({ type: 'phase' }) },
   { group: 'Acciones globales', id: 'lifeUp', label: 'Aumentar vida', keys: 'ArrowUp', run: () => act(seatNow(), { type: 'life', delta: 1 }) },
   { group: 'Acciones globales', id: 'lifeDown', label: 'Disminuir vida', keys: 'ArrowDown', run: () => act(seatNow(), { type: 'life', delta: -1 }) },
@@ -1617,6 +1697,11 @@ document.addEventListener('keydown', (e) => {
   }
   if (!state || e.target.closest('input, textarea, select')) return;
   if (document.querySelector('.modal:not(.hidden)')) return;
+  const opening = document.querySelector('#opening:not(.min)');
+  if (opening) {
+    if (e.key === 'Enter') { e.preventDefault(); opening._keep?.(); }
+    return; // los atajos de la mesa esperan a que conserves la mano
+  }
   const combo = comboFromEvent(e);
   const sc = combo && SHORTCUTS.find((x) => bindingOf(x) === combo);
   if (!sc) return;

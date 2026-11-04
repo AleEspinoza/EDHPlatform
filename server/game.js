@@ -102,6 +102,7 @@ export function addPlayer(room, name, { controlledBy = null, userId = null } = {
     poison: 0,
     cmdDamage: {},
     mana: emptyMana(),
+    opening: null, // mano inicial pendiente: { mulligans } hasta que el jugador la conserve
     mat: { ...DEFAULT_MAT }, // tapete elegido: { kind: 'color'|'image'|'anim', value } (null = el de la taberna)
     zones: emptyZones(),
     deck: null, // lista original para reiniciar
@@ -311,6 +312,17 @@ function setupDeck(room, p) {
   cleanupAttachments(room);
 }
 
+const OPENING_HAND = 7;
+const MAX_MULLIGANS = 7;
+/** Cartas que van al fondo al conservar: el primer mulligan es gratis (regla multijugador). */
+const toBottomFor = (mulligans) => Math.max(0, mulligans - 1);
+
+/** Roba la mano inicial y deja al jugador decidiendo: mulligan o conservar. */
+function startOpening(room, p) {
+  draw(room, p, OPENING_HAND);
+  p.opening = { mulligans: 0 };
+}
+
 /** En el modo solitario, el anfitrión puede actuar por los asientos que controla. */
 function resolveActor(room, playerId, seatId) {
   const p = getPlayer(room, playerId);
@@ -341,6 +353,8 @@ export function applyAction(room, playerId, action) {
       p.life = STARTING_LIFE;
       p.poison = 0;
       p.cmdDamage = {};
+      p.mana = emptyMana();
+      if (a.opening !== false) startOpening(room, p);
       const cmd = p.deck.commanders.map((c) => c.name).join(' + ') || 'sin comandante';
       log(room, `${p.name} cargó un mazo (${p.deck.cards.length + p.deck.commanders.length} cartas, ${cmd})`);
       return {};
@@ -372,10 +386,34 @@ export function applyAction(room, playerId, action) {
       log(room, `${p.name} endereza todos sus permanentes`);
       return {};
     case 'mulligan': {
+      if (p.opening && p.opening.mulligans >= MAX_MULLIGANS) throw new GameError('No quedan mulligans');
       p.zones.library.push(...p.zones.hand.splice(0));
       shuffle(p.zones.library);
-      draw(room, p, 7);
-      log(room, `${p.name} hace mulligan y roba 7`);
+      draw(room, p, OPENING_HAND);
+      if (p.opening) {
+        p.opening.mulligans += 1;
+        const n = toBottomFor(p.opening.mulligans);
+        log(room, `${p.name} hace su ${p.opening.mulligans}.º mulligan (${n ? `${n} al fondo al conservar` : 'gratis'})`);
+      } else log(room, `${p.name} hace mulligan y roba 7`);
+      return {};
+    }
+    case 'keepHand': {
+      if (!p.opening) throw new GameError('No hay una mano inicial por decidir');
+      const need = Math.min(toBottomFor(p.opening.mulligans), p.zones.hand.length);
+      const ids = Array.isArray(a.bottom) ? [...new Set(a.bottom.map((x) => str(x, 64)))] : [];
+      if (ids.length !== need) throw new GameError(`Elige ${need} carta${need === 1 ? '' : 's'} para el fondo`);
+      const cards = ids.map((iid) => {
+        const i = p.zones.hand.findIndex((c) => c.iid === iid);
+        if (i === -1) throw new GameError('Esa carta no está en tu mano');
+        return p.zones.hand[i];
+      });
+      p.zones.hand = p.zones.hand.filter((c) => !cards.includes(c));
+      p.zones.library.unshift(...cards.reverse()); // la biblioteca se roba desde el final: el inicio es el fondo
+      const m = p.opening.mulligans;
+      p.opening = null;
+      log(room, need
+        ? `${p.name} conserva su mano tras ${m} mulligan${m === 1 ? '' : 's'} y pone ${need} carta${need === 1 ? '' : 's'} en el fondo`
+        : `${p.name} conserva su mano${m ? ' (mulligan gratis)' : ''}`);
       return {};
     }
     case 'move':
@@ -461,6 +499,7 @@ export function applyAction(room, playerId, action) {
       if (p.deck && a.copyDeck) {
         seat.deck = structuredClone(p.deck);
         setupDeck(room, seat);
+        if (a.opening !== false) startOpening(room, seat);
       }
       return {};
     }
@@ -555,6 +594,8 @@ export function applyAction(room, playerId, action) {
         for (const pl of room.players) {
           if (!pl.deck) continue;
           setupDeck(room, pl);
+          startOpening(room, pl);
+          pl.mana = emptyMana();
           pl.life = STARTING_LIFE;
           pl.poison = 0;
           pl.cmdDamage = {};
@@ -589,6 +630,7 @@ export function applyAction(room, playerId, action) {
     case 'phase': {
       if (room.activePlayerId !== p.id && !p.controlledBy) throw new GameError('Solo el jugador activo avanza la fase');
       room.phase = (room.phase + 1) % PHASES.length;
+      for (const pl of room.players) pl.mana = emptyMana(); // el maná flotante se vacía entre fases
       log(room, `Fase: ${PHASES[room.phase]}`);
       return {};
     }
@@ -629,7 +671,9 @@ export function applyAction(room, playerId, action) {
       p.life = STARTING_LIFE;
       p.poison = 0;
       p.cmdDamage = {};
-      log(room, `${p.name} reinicia su partida`);
+      p.mana = emptyMana();
+      startOpening(room, p);
+      log(room, `${p.name} reinicia su partida y roba su mano inicial`);
       return {};
     }
     case 'chat': {
@@ -811,6 +855,7 @@ export function viewFor(room, viewerId) {
         poison: p.poison,
         cmdDamage: p.cmdDamage,
         mana: p.mana,
+        opening: p.opening ? { mulligans: p.opening.mulligans, toBottom: toBottomFor(p.opening.mulligans) } : null,
         mat: p.mat,
         connected: p.connected,
         controlledBy: p.controlledBy,

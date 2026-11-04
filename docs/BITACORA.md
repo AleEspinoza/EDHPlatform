@@ -1,6 +1,6 @@
 # EDH Platform — estado y bitácora
 
-Mesa virtual de Commander (EDH) inspirada en EDHPlay, con mejoras propias. Al 3 de noviembre de 2026 va en la **versión 0.10**: 18 commits y 35 pruebas automáticas que pasan.
+Mesa virtual de Commander (EDH) inspirada en EDHPlay, con mejoras propias. Al 3 de noviembre de 2026 va en la **versión 0.11**: 22 commits y 35 pruebas automáticas que pasan.
 
 - **Repo:** [github.com/AleEspinoza/EDHPlatform](https://github.com/AleEspinoza/EDHPlatform) (público, rama `main`)
 - **Correr en local:** `npm install && npm start` → `http://localhost:3000` (requiere Node 22.13 o superior)
@@ -30,7 +30,7 @@ Tener una plataforma propia para jugar Commander en línea con amigos, con **tod
 | Tu inicio | Mis mazos, historial de partidas y estadísticas (récord, % de victorias, turnos, duración, por comandante) |
 | Mazos | Pegar lista (Moxfield, Archidekt, MTGO) con imágenes de Scryfall; guardar y jugar con un clic |
 | Mecánicas | Todas las zonas, robar, moler, girar, contadores, tokens, adjuntar, cambio de control, enviar cartas a otros, zonas rivales, mulligan, buscar y mirar tope o fondo |
-| Mesa | Fases, maná flotante, flechas a cualquier cosa, selección múltiple, +X/+Y, vida, veneno y daño de comandante |
+| Mesa | Mano inicial con mulligan, fases, maná flotante (se vacía al cambiar de fase), flechas a cualquier cosa, selección múltiple, +X/+Y, vida, veneno y daño de comandante |
 | Mejoras sobre EDHPlay | Carteles de cómic animados (Trigger, Respondo, Espera, OK, Tu turno), comandos de chat (`/moneda`, `/dado 2d6`…), reacciones |
 | Atajos | Idénticos a los de EDHPlay por defecto y reasignables (tecla `I`) |
 | Solitario | Práctica con asientos extra que controlas tú |
@@ -64,6 +64,7 @@ Tener una plataforma propia para jugar Commander en línea con amigos, con **tod
 | 0.6 | 01/11 | Login con Google, cuenta obligatoria, historial y estadísticas, terminar partida, atajos reasignables |
 | 0.7 | 01/11 | Estilo Taberna con el arte de Alejandro, atajos idénticos a EDHPlay, flechas, fases, maná, reacciones |
 | 0.8 | 01/11 | Campo en todo el tapete, mano sin parpadeo, flechas a cualquier zona, enviar cartas a otros, tapetes elegibles |
+| 0.11 | 03/11 | Mano inicial a pantalla completa con mulligan (primero gratis, luego 1 más al fondo cada vez) y contador de maná flotante con los símbolos |
 | 0.10 | 03/11 | Cuentas persistentes: base libSQL lista para Turso, `.env` local para las claves |
 | 0.9 | 01/11 | Tapetes animados tipo lámpara de lava, tapetes de Alejandro (Olas por defecto), logo y portada «Placa rúnica», blueprint de Render |
 

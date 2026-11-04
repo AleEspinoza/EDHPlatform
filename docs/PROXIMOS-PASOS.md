@@ -2,6 +2,15 @@
 
 Lo que sigue, en orden de prioridad. Los primeros tres juntos dejan la plataforma publicada, con cuentas que no se borran y entrada con Google.
 
+## Pendientes prioritarios (de Alejandro)
+
+El código ya está listo; esto solo lo puedes hacer tú, porque las cuentas deben quedar a tu nombre. Las claves se pegan en el panel de Render y en tu `.env` local, nunca en el repo.
+
+- [ ] **Turso:** crear cuenta en turso.tech (con GitHub), crear una base y copiar su URL y un token
+- [ ] **Google:** crear las credenciales en Google Cloud (pasos en la sección 2). Agregar como redirect `https://edhplatform.onrender.com/api/auth/google/callback`
+- [ ] **Render:** en **Environment**, cargar `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`
+- [ ] **Comprobar:** abrir `https://edhplatform.onrender.com/health` y ver `"db":"turso"`
+
 ## 1. Que las cuentas persistan (base de datos externa)
 
 **El problema:** hoy las cuentas, mazos e historial viven en un archivo SQLite dentro del servidor. En local se conservan, pero en Render gratis el disco se borra cada vez que el servidor se duerme (tras 15 minutos sin uso) o se redespliega. Publicado así, los jugadores tendrían que volver a crear su cuenta en cada sesión.
